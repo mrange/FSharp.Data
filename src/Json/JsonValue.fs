@@ -102,6 +102,417 @@ module JsonValue =
 // JSON parser
 // --------------------------------------------------------------------------------------
 
+module MiniParser = 
+
+    open System
+    open System.Diagnostics
+
+    [<Struct>]
+    type Substring(i : string, b : int, e : int) =
+        member x.Input      = i
+        member x.Begin      = b
+        member x.End        = e
+        member x.Str        = i.Substring(b, e - b)
+        member x.Char idx   = i.[idx]
+
+
+    
+    [<Struct>]
+    type ParserState<'UserState>(input : string, position : int, userState : 'UserState) = 
+        
+        member x.Input      = input
+        member x.Position   = position
+        member x.UserState  = userState
+        member x.IsEOF      = position >= input.Length || position < 0
+
+        member x.Match atLeast atMost (test : char->int->bool) : (Substring*ParserState<'UserState>) option = 
+            Debug.Assert (atLeast >= 0)
+            Debug.Assert (atMost >= atLeast)
+
+            let i           = input
+            let ``begin``   = position
+            let length      = i.Length
+            let remaining   = length - ``begin``
+            
+            if x.IsEOF then
+                None
+            else 
+                let ``end`` = min length <| ``begin`` + atMost
+                
+                let mutable cont = true
+                let mutable p = ``begin``
+
+                while cont && p < ``end`` do
+                    cont    <- test i.[p] p
+                    p       <- p + 1
+
+                if not cont then
+                    None
+                else
+                    Some (Substring(i,``begin``, p),ParserState(i,p, userState))
+
+                    
+                    
+    type ErrorMessage =
+        | Expected of string
+    
+    type ParserResult<'Result,'UserState> =
+         | Success of 'Result * ParserState<'UserState>
+         | Failure of ErrorMessage list * ParserState<'UserState> 
+
+    type Parser<'Result, 'UserState> = ParserState<'UserState> -> ParserResult<'Result, 'UserState>
+
+    let run (p : Parser<'T, unit>) (s : string) : ParserResult<'T, unit> = 
+        let ps = ParserState(s, 0, ())
+        p ps
+
+    let success (v : 'T) ps = Success (v, ps)
+    let failure ems      ps = Failure (ems, ps)
+
+    let preturn (v : 'T) : Parser<'T, 'UserState> = fun ps -> success v ps 
+
+    let eof : Parser<unit, 'UserState> = 
+        let ems = [Expected "EOF"]
+        fun ps ->
+            match ps.IsEOF with
+            | false -> failure ems ps
+            | true  -> success () ps
+
+    let spaces : Parser<unit, 'UserState> = 
+        let test ch p = Char.IsWhiteSpace ch
+        fun ps ->
+            match ps.Match 0 Int32.MaxValue test with
+            | Some (_,ps)   -> success () ps
+            | _             -> failwith "spaces can't fail"
+
+    let skipChar (c : char): Parser<unit, 'UserState> = 
+        let test ch p = ch = c
+        let ems = [Expected <| c.ToString()]
+        fun ps ->
+            match ps.Match 1 1 test with
+            | Some (_,ps)   -> success () ps
+            | _             -> failure ems ps
+
+    let attempt (p : Parser<'T, 'UserState>) : Parser<'T, 'UserState> = 
+        fun ps -> 
+            p ps
+
+    let orElse (l : Parser<'T, 'UserState>) (r : Parser<'T, 'UserState>) : Parser<'T, 'UserState> = 
+        fun ps ->
+            match l ps with
+            | Failure (ems,ps)  -> r ps
+            | Success (lv, lps) -> Success (lv, lps)
+    let ( <|> ) = orElse
+
+    let map (p : Parser<'TFrom, 'UserState>) (m : 'TFrom->'TTo) : Parser<'TTo, 'UserState> = 
+        fun ps ->
+            match p ps with
+            | Failure (ems,ps)  -> Failure (ems,ps)
+            | Success (v, ps)   -> Success (m v, ps)
+    let ( |>> ) = map
+
+    let combine (l : Parser<'L, 'UserState>) (r : Parser<'R, 'UserState>) : Parser<'L*'R, 'UserState> = 
+        fun ps ->
+            match l ps with
+            | Failure (lems,lps)  -> Failure (lems,lps)
+            | Success (lv, lps)  -> 
+                match r lps with
+                | Failure (rems,rps)    -> Failure (rems,rps)
+                | Success (rv, rps)     -> Success ((lv,rv), rps)
+    let ( .>>. ) = combine
+
+    let keepLeft (l : Parser<'L, 'UserState>) (r : Parser<'R, 'UserState>) : Parser<'L, 'UserState> = 
+        l .>>. r |>> (fun (lv, _) -> lv)
+    let ( .>> ) = keepLeft
+        
+    let keepRight (l : Parser<'L, 'UserState>) (r : Parser<'R, 'UserState>) : Parser<'R, 'UserState> = 
+        l .>>. r |>> (fun (_, rv) -> rv)
+    let ( >>. ) = keepRight
+
+    let skipSatisfyImpl (test : char->int->bool) (ems : ErrorMessage list) : Parser<unit, 'UserState> =
+        fun ps ->
+            match ps.Match 1 1 test with
+            | Some (ss,ps)  -> success () ps
+            | _             -> failure ems ps
+        
+    let satisfyImpl (test : char->int->bool) (ems : ErrorMessage list) : Parser<char, 'UserState> =
+        fun ps ->
+            match ps.Match 1 1 test with
+            | Some (ss,ps)  -> success (ss.Char 0) ps
+            | _             -> failure ems ps
+
+    let skipSatisfy (t : char->bool) : Parser<unit, 'UserState> = 
+        let test ch p = t ch
+        let ems = [Expected "Satisfy"]
+        skipSatisfyImpl test ems
+
+    let satisfy (t : char->bool) : Parser<char, 'UserState> = 
+        let test ch p = t ch
+        let ems = [Expected "Satisfy"]
+        satisfyImpl test ems
+        
+    let skipAnyOf (s : string) : Parser<unit, 'UserState> = 
+        let set = s |> Set.ofSeq
+        let ems = s |> Seq.map (fun c -> Expected <| c.ToString()) |> Seq.toList
+        let test ch p = set.Contains ch
+        skipSatisfyImpl test ems
+
+    let anyOf (s : string) : Parser<char, 'UserState> = 
+        let set = s |> Set.ofSeq
+        let ems = s |> Seq.map (fun c -> Expected <| c.ToString()) |> Seq.toList
+        let test ch p = set.Contains ch
+        satisfyImpl test ems
+
+    let digit : Parser<char, 'UserState> =
+        let ems = [Expected "HexDigit"]
+        let test (ch : char) p = 
+            match ch with
+            | _ when ch >= '0' && ch <= '9' -> true
+            | _ -> false
+        satisfyImpl test ems
+
+    let hex : Parser<char, 'UserState> =
+        let ems = [Expected "HexDigit"]
+        let test (ch : char) p = 
+            match ch with
+            | _ when ch >= '0' && ch <= '9' -> true
+            | _ when ch >= 'a' && ch <= 'f' -> true
+            | _ when ch >= 'A' && ch <= 'F' -> true
+            | _ -> false
+        satisfyImpl test ems
+
+    let pipe3 
+            (p0 : Parser<'T0, 'UserState>) 
+            (p1 : Parser<'T1, 'UserState>) 
+            (p2 : Parser<'T2, 'UserState>) 
+            (m  : 'T0->'T1->'T2->'T)
+            : Parser<'T, 'UserState> = 
+        fun ps ->
+            match p0 ps with
+            | Failure (ems0, ps0)   -> Failure (ems0, ps0)
+            | Success (v0, ps0)     ->
+                match p1 ps0 with
+                | Failure (ems1, ps1)   -> Failure (ems1, ps1)
+                | Success (v1, ps1)     ->
+                    match p2 ps1 with
+                    | Failure (ems2, ps2)   -> Failure (ems2, ps2)
+                    | Success (v2, ps2)     -> success (m v0 v1 v2) ps2
+    let pipe4 
+            (p0 : Parser<'T0, 'UserState>) 
+            (p1 : Parser<'T1, 'UserState>) 
+            (p2 : Parser<'T2, 'UserState>) 
+            (p3 : Parser<'T3, 'UserState>)
+            (m  : 'T0->'T1->'T2->'T3->'T)
+            : Parser<'T, 'UserState> = 
+        fun ps ->
+            match p0 ps with
+            | Failure (ems0, ps0)   -> Failure (ems0, ps0)
+            | Success (v0, ps0)     ->
+                match p1 ps0 with
+                | Failure (ems1, ps1)   -> Failure (ems1, ps1)
+                | Success (v1, ps1)     ->
+                    match p2 ps1 with
+                    | Failure (ems2, ps2)   -> Failure (ems2, ps2)
+                    | Success (v2, ps2)     ->
+                        match p3 ps2 with
+                        | Failure (ems3, ps3)   -> Failure (ems3, ps3)
+                        | Success (v3, ps3)     -> success (m v0 v1 v2 v3) ps3
+
+    let choice (parsers : Parser<'T, 'UserState> list) : Parser<'T, 'UserState> = 
+        fun ps ->
+            let mutable finalEms    = []
+            let mutable result      = None
+            let mutable remaining   = parsers
+            while result.IsNone && remaining.Length > 0 do
+                let p = remaining.Head
+                remaining <- remaining.Tail
+                match p ps with
+                | Failure (ems, _)  -> finalEms <- ems@finalEms
+                | Success (v, ps)   -> result <- Some (v,ps)
+
+            match result with 
+            | None          -> failure finalEms ps
+            | Some (v,ps)   -> success v ps
+    
+    let between 
+            (b : Parser<_, 'UserState>) 
+            (e : Parser<_, 'UserState>) 
+            (p : Parser<'T, 'UserState>) 
+            : Parser<'T, 'UserState> =
+            pipe3 b p e <| fun _ v _ -> v
+
+    let charReturn (c : char) (v : 'T) : Parser<'T, 'UserState> = 
+        let test ch p   = c = ch
+        let ems         = [Expected <| c.ToString()]
+        fun ps ->
+            match ps.Match 1 1 test with
+            | None          -> failure ems ps
+            | Some (_,ps)   -> success v ps
+
+    let stringReturn (s : string) (v : 'T) : Parser<'T, 'UserState> = 
+        let test ch p   = s.[p] = ch
+        let ems         = [Expected s]
+        fun ps ->
+            match ps.Match s.Length s.Length test with
+            | None          -> failure ems ps
+            | Some (_,ps)   -> success v ps
+
+    let many (p : Parser<'T, 'UserState>) : Parser<'T list, 'UserState> = 
+        fun ps ->
+            let mutable result  = []
+            let mutable cps     = ps
+            while 
+                match p cps with
+                | Failure _         -> false
+                | Success (v, vps)  ->
+                    result  <- v::result
+                    cps     <- vps
+                    true
+                do
+                ()
+
+            success result cps
+
+    let manyChars (p : Parser<char, 'UserState>) : Parser<string, 'UserState> = 
+        fun ps ->
+            let result          = StringBuilder()
+            let mutable cps     = ps
+            while 
+                match p cps with
+                | Failure _         -> false
+                | Success (v, vps)  ->
+                    ignore <| result.Append(v)
+                    cps     <- vps
+                    true
+                do
+                ()
+
+            success (result.ToString()) cps
+
+    let sepBy (p : Parser<'T, 'UserState>) (sep : Parser<_, 'UserState>) : Parser<'T list, 'UserState> = 
+        fun ps ->
+            let mutable ems     = None
+            let mutable result  = []
+            let mutable cps     = ps
+
+            if match p cps with
+                | Failure _-> false
+
+            while 
+                match p cps with
+                | Failure _         -> false
+                | Success (v, vps)  ->
+                    result  <- v::result
+                    cps     <- vps
+                    true
+                do
+                ()
+
+            success result cps
+
+
+open MiniParser
+
+type private JsonParser2(jsonText:string, cultureInfo, tolerateErrors) = 
+
+    let satisfy1To9 c = c >= '1' && c <= '9'
+
+    let hex2int c = 
+        match c with
+        | _ when c >= '0' && c <= '9'   -> (int c) - (int '0')     
+        | _ when c >= 'a' && c <= 'f'   -> (int c) - (int 'a') + 10
+        | _ when c >= 'A' && c <= 'F'   -> (int c) - (int 'A') + 10
+        | _                             -> 0
+        
+    let makeDouble (d : int) (i : int64) (n :int) (f : float) (e : float) = 
+        ((float d) * (pown 10. n) + (float i) + f)*e
+
+    let p_ws            : Parser<unit, unit>        = spaces
+    let p_token token   : Parser<unit, unit>        = skipChar token
+    let p_wstoken token : Parser<unit, unit>        = attempt (p_ws >>. p_token token)
+
+    let p_escape        : Parser<char, unit>      =  
+            anyOf """"\/bfnrt"""
+            |>> function
+                | 'b' -> '\b'
+                | 'f' -> '\f'
+                | 'n' -> '\n'
+                | 'r' -> '\r'
+                | 't' -> '\t'
+                | c   -> c
+    let p_unicodeEscape : Parser<char, unit>      =
+        p_token 'u' >>. pipe4 hex hex hex hex (fun h3 h2 h1 h0 -> 
+            (hex2int h3)*0x1000 + (hex2int h2)*0x100 + (hex2int h1)*0x10 + hex2int h0 |> char
+        )
+    let p_char          : Parser<char, unit>        =
+        choice
+            [
+                satisfy (fun ch -> ch <> '"' && ch <> '\\')
+                p_token '\\' >>. (p_escape <|> p_unicodeEscape)
+            ]
+    let p_stringLiteral : Parser<string, unit>      =
+        between (p_token '"') (p_token '"') (manyChars p_char)
+
+    let p_digit1To9     : Parser<char, unit>        = satisfy satisfy1To9
+    let p_digit         : Parser<int, unit>         = digit |>> hex2int
+    let p_int           : Parser<int64*int, unit>   = many p_digit |>> (fun digits ->
+                            let mutable result = 0L
+                            for d in digits do
+                                result <- 10L * result + (int64 d)
+                            result,digits.Length
+                        )
+    let p_e             : Parser<float, unit>       = 
+        skipAnyOf "eE" >>. (choice [charReturn '-' 0.1;charReturn '+' 10.] <|> preturn 10.)
+    let p_exponent      : Parser<float, unit>       = 
+        p_e .>>. p_int |>> (fun (exp, (i,_)) -> pown exp (int i)) <|> preturn 1.
+    let p_fraction      : Parser<float, unit>       = 
+        (p_token '.' >>. (p_int |>> (fun (v,n) -> (float v) * (pown 0.1 n)))) <|> preturn 0.
+    let p_sign          : Parser<float, unit>       = 
+        (charReturn '-' -1.) <|> preturn 1.
+    let p_digit19       : Parser<int, unit>         = 
+        p_digit1To9 |>> hex2int
+    let p_numberLiteral : Parser<float, unit>       = 
+        p_sign .>>. choice 
+                        [
+                            // JSON doesn't allow numbers like 0123 (has to be 123).
+                            // This is probably to avoid issues with octals numbers
+                            pipe3 (p_token '0') p_fraction p_exponent (fun _ f e -> makeDouble 0 0L 0 f e)
+                            pipe4 p_digit19 p_int p_fraction p_exponent (fun d (v,n) f e -> makeDouble d v n f e)
+                        ] |>> (fun (s,n) -> s*n)
+
+
+    let p_null          : Parser<JsonValue, unit>    = stringReturn "null"   JsonValue.Null
+    let p_true          : Parser<JsonValue, unit>    = stringReturn "true"   <| JsonValue.Boolean true
+    let p_false         : Parser<JsonValue, unit>    = stringReturn "false"  <| JsonValue.Boolean false
+    let p_string        : Parser<JsonValue, unit>    = p_stringLiteral       |>> JsonValue.String
+    let p_number        : Parser<JsonValue, unit>    = p_numberLiteral       |>> JsonValue.Float
+
+    let rec p_value     : Parser<JsonValue, unit>    = fun cs -> 
+        cs 
+        |>  (p_ws 
+                >>. choice
+                    [
+                        p_null  
+                        p_true
+                        p_false
+                        p_string
+                        p_number  
+                        p_object
+                        p_array  
+                    ])
+    and p_member        : Parser<string*JsonValue, unit> = 
+        p_ws >>. p_stringLiteral .>> p_ws .>> (p_token ':') .>>. p_value
+    and p_object        : Parser<JsonValue, unit>        = 
+        between (p_token '{') (p_wstoken '}') (sepBy p_member (p_wstoken ',') |>> Object)
+    and p_array         : Parser<JsonValue, unit>        = 
+        between (p_token '[') (p_wstoken ']') (sepBy p_value (p_wstoken ',') |>> Array)
+
+    let p_root          : Parser<JsonValue, unit>        = p_ws >>. choice [p_object;p_array]
+    
+    let p_json = p_root .>> p_ws .>> eof
+
+    member x.Parse str = run p_json str
+
 type private JsonParser(jsonText:string, cultureInfo, tolerateErrors) =
 
     let cultureInfo = defaultArg cultureInfo CultureInfo.InvariantCulture
