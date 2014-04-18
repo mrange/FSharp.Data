@@ -170,10 +170,11 @@ module Parser =
                     
     type ErrorMessage =
         | Expected      of string
+        | Group         of ErrorMessage list
     
     type ParserResult<'Result,'UserState> =
          | Success of 'Result * ParserState<'UserState>
-         | Failure of ErrorMessage list * ParserState<'UserState> 
+         | Failure of ErrorMessage * ParserState<'UserState> 
 
     type Parser<'Result, 'UserState> = ParserState<'UserState> -> ParserResult<'Result, 'UserState>
 
@@ -181,7 +182,7 @@ module Parser =
         let ps = ParserState(s, 0, ())
         p ps
 
-    let prettify (_ : ErrorMessage list) (ps : ParserState<'UserState>) =
+    let prettify (_ : ErrorMessage) (ps : ParserState<'UserState>) =
         // TODO:
         sprintf "Parse failed at %d" ps.Position
 
@@ -196,7 +197,7 @@ module Parser =
             r
 
     let eof : Parser<unit, 'UserState> = 
-        let ems = [Expected "EOF"]
+        let ems = Expected "EOF"
         fun ps ->
             match ps.IsEOF with
             | false -> failure ems ps
@@ -210,7 +211,7 @@ module Parser =
 
     let skipChar (c : char): Parser<unit, 'UserState> = 
         let test ch _ = ch = c
-        let ems = [Expected <| c.ToString()]
+        let ems = Expected <| c.ToString()
         fun ps ->
             let ss,ps = ps.Match 1 1 test
             if not ss.IsEmpty then success () ps
@@ -264,13 +265,13 @@ module Parser =
                 | Success (rv, rps)     -> Success (rv, rps)
     let ( >>. ) = keepRight
 
-    let skipSatisfyImpl (test : char->int->bool) (ems : ErrorMessage list) : Parser<unit, 'UserState> =
+    let skipSatisfyImpl (test : char->int->bool) (ems : ErrorMessage) : Parser<unit, 'UserState> =
         fun ps ->
             let ss,ps = ps.Match 1 1 test
             if not ss.IsEmpty then success () ps
             else failure ems ps
         
-    let satisfyImpl (test : char->int->bool) (ems : ErrorMessage list) : Parser<char, 'UserState> =
+    let satisfyImpl (test : char->int->bool) (ems : ErrorMessage) : Parser<char, 'UserState> =
         fun ps ->
             let ss,ps = ps.Match 1 1 test
             if not ss.IsEmpty then success (ss.Char 0) ps
@@ -278,30 +279,30 @@ module Parser =
 
     let skipSatisfy (t : char->bool) : Parser<unit, 'UserState> = 
         let test ch _ = t ch
-        let ems = [Expected "Satisfy"]
+        let ems = Expected "Satisfy"
         skipSatisfyImpl test ems
 
     let satisfy (t : char->bool) : Parser<char, 'UserState> = 
         let test ch _ = t ch
-        let ems = [Expected "Satisfy"]
+        let ems = Expected "Satisfy"
         satisfyImpl test ems
         
     let skipAnyOf (s : string) : Parser<unit, 'UserState> = 
         let chars       = s.ToCharArray () 
         let set         = chars |> Set.ofArray
-        let ems         = chars |> Array.map (fun c -> Expected <| c.ToString()) |> Seq.toList
+        let ems         = chars |> Array.map (fun c -> Expected <| c.ToString()) |> Seq.toList |> Group
         let test ch _   = set.Contains ch
         skipSatisfyImpl test ems
 
     let anyOf (s : string) : Parser<char, 'UserState> = 
         let chars       = s.ToCharArray () 
         let set         = chars |> Set.ofArray
-        let ems         = chars |> Array.map (fun c -> Expected <| c.ToString()) |> Seq.toList
+        let ems         = chars |> Array.map (fun c -> Expected <| c.ToString()) |> Seq.toList |> Group
         let test ch _   = set.Contains ch
         satisfyImpl test ems
 
     let digit : Parser<char, 'UserState> =
-        let ems = [Expected "HexDigit"]
+        let ems = Expected "Digit"
         let test (ch : char) _ = 
             match ch with
             | _ when ch >= '0' && ch <= '9' -> true
@@ -309,7 +310,7 @@ module Parser =
         fun ps -> ps |> satisfyImpl test ems
 
     let hex : Parser<char, 'UserState> =
-        let ems = [Expected "HexDigit"]
+        let ems = Expected "HexDigit"
         let test (ch : char) _ = 
             match ch with
             | _ when ch >= '0' && ch <= '9' -> true
@@ -376,11 +377,11 @@ module Parser =
                 let p = remaining.Head
                 remaining <- remaining.Tail
                 match p ps with
-                | Failure (ems, _)  -> finalEms <- ems@finalEms
+                | Failure (ems, _)  -> finalEms <- ems::finalEms
                 | Success (v, ps)   -> result <- Some (v,ps)
 
             match result with 
-            | None          -> failure finalEms ps
+            | None          -> failure (Group finalEms) ps
             | Some (v,ps)   -> success v ps
     
     let between 
@@ -392,7 +393,7 @@ module Parser =
 
     let charReturn (c : char) (v : 'T) : Parser<'T, 'UserState> = 
         let test ch _   = c = ch
-        let ems         = [Expected <| c.ToString()]
+        let ems         = Expected <| c.ToString()
         fun ps ->
             let ss,ps = ps.Match 1 1 test
             if not ss.IsEmpty then success v ps
@@ -401,7 +402,7 @@ module Parser =
     let stringReturn (s : string) (v : 'T) : Parser<'T, 'UserState> = 
         let test ch p   = s.[p] = ch
         let length      = s.Length
-        let ems         = [Expected s]
+        let ems         = Expected s
         fun ps ->
             let ss,ps = ps.Match length length test
             if not ss.IsEmpty then success v ps
