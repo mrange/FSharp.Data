@@ -102,10 +102,13 @@ module JsonValue =
 // JSON parser
 // --------------------------------------------------------------------------------------
 
-module MiniParser = 
+module Parser = 
 
     open System
     open System.Diagnostics
+    open System.Collections.Generic
+    
+    let initialCapacity = 16
 
     [<Struct>]
     type Substring(i : string, b : int, e : int) =
@@ -118,7 +121,7 @@ module MiniParser =
         member x.IsEmpty    = b = e
 
         member x.Str        = i.Substring(b, e - b)
-        member x.Char idx   = i.[idx]
+        member x.Char idx   = i.[b + idx]
 
         static member Empty = empty 
 
@@ -138,23 +141,30 @@ module MiniParser =
             let i           = input
             let ``begin``   = position
             let length      = i.Length
-            
-            if x.IsEOF then
+
+            let remaining   = length - ``begin``
+
+            if atLeast > remaining then
                 Substring.Empty,x
             else 
-                let ``end`` = min length <| ``begin`` + atMost
+                let required    = ``begin`` + atLeast
+                let ``end``     = ``begin`` + min remaining atMost
                 
                 let mutable cont = true
-                let mutable p = ``begin``
+                let mutable iter = 0
+                let mutable pos  = ``begin``
 
-                while cont && p < ``end`` do
-                    cont    <- test i.[p] p
-                    p       <- p + 1
+                while cont && pos < ``end`` do
+                    cont    <- test i.[pos] iter
+                    iter    <- iter + 1
+                    pos     <- pos + 1
 
-                if not cont then
+                let stopped = if cont then pos else pos - 1
+                
+                if required > stopped then
                     Substring.Empty,x
                 else
-                    Substring(i,``begin``, p),ParserState(i,p, userState)
+                    Substring(i,``begin``, stopped),ParserState(i,stopped, userState)
 
                     
                     
@@ -180,6 +190,11 @@ module MiniParser =
 
     let preturn (v : 'T) : Parser<'T, 'UserState> = fun ps -> success v ps 
 
+    let debug (p : Parser<'T, 'UserState>) : Parser<'T, 'UserState> = 
+        fun ps -> 
+            let r = p ps
+            r
+
     let eof : Parser<unit, 'UserState> = 
         let ems = [Expected "EOF"]
         fun ps ->
@@ -191,8 +206,7 @@ module MiniParser =
         let test ch _ = Char.IsWhiteSpace ch
         fun ps ->
             let ss,ps = ps.Match 0 Int32.MaxValue test
-            if not ss.IsEmpty then success () ps
-            else failure [Expected "whitespace"] ps
+            success () ps
 
     let skipChar (c : char): Parser<unit, 'UserState> = 
         let test ch _ = ch = c
@@ -231,11 +245,23 @@ module MiniParser =
     let ( .>>. ) = combine
 
     let keepLeft (l : Parser<'L, 'UserState>) (r : Parser<'R, 'UserState>) : Parser<'L, 'UserState> = 
-        l .>>. r |>> (fun (lv, _) -> lv)
+        fun ps ->
+            match l ps with
+            | Failure (lems,lps)  -> Failure (lems,lps)
+            | Success (lv, lps)  -> 
+                match r lps with
+                | Failure (rems,rps)    -> Failure (rems,rps)
+                | Success (_, rps)     -> Success (lv, rps)
     let ( .>> ) = keepLeft
         
     let keepRight (l : Parser<'L, 'UserState>) (r : Parser<'R, 'UserState>) : Parser<'R, 'UserState> = 
-        l .>>. r |>> (fun (_, rv) -> rv)
+        fun ps ->
+            match l ps with
+            | Failure (lems,lps)  -> Failure (lems,lps)
+            | Success (_, lps)  -> 
+                match r lps with
+                | Failure (rems,rps)    -> Failure (rems,rps)
+                | Success (rv, rps)     -> Success (rv, rps)
     let ( >>. ) = keepRight
 
     let skipSatisfyImpl (test : char->int->bool) (ems : ErrorMessage list) : Parser<unit, 'UserState> =
@@ -292,6 +318,18 @@ module MiniParser =
             | _ -> false
         fun ps -> ps |> satisfyImpl test ems
 
+    let pipe2 
+            (p0 : Parser<'T0, 'UserState>) 
+            (p1 : Parser<'T1, 'UserState>) 
+            (m  : 'T0->'T1->'T)
+            : Parser<'T, 'UserState> = 
+        fun ps ->
+            match p0 ps with
+            | Failure (ems0, ps0)   -> Failure (ems0, ps0)
+            | Success (v0, ps0)     ->
+                match p1 ps0 with
+                | Failure (ems1, ps1)   -> Failure (ems1, ps1)
+                | Success (v1, ps1)     -> success (m v0 v1) ps1
     let pipe3 
             (p0 : Parser<'T0, 'UserState>) 
             (p1 : Parser<'T1, 'UserState>) 
@@ -371,19 +409,19 @@ module MiniParser =
 
     let many (p : Parser<'T, 'UserState>) : Parser<'T list, 'UserState> = 
         fun ps ->
-            let mutable result  = []
+            let result          = List<'T>(initialCapacity)
             let mutable cps     = ps
             while 
                 match p cps with
                 | Failure _         -> false
                 | Success (v, vps)  ->
-                    result  <- v::result
+                    result.Add v
                     cps     <- vps
                     true
                 do
                 ()
 
-            success result cps
+            success (result |> Seq.toList) cps
 
     let manyChars (p : Parser<char, 'UserState>) : Parser<string, 'UserState> = 
         fun ps ->
@@ -404,13 +442,13 @@ module MiniParser =
     let sepBy (p : Parser<'T, 'UserState>) (sep : Parser<_, 'UserState>) : Parser<'T list, 'UserState> = 
         fun ps ->
             let mutable rems    = None
-            let mutable result  = []
+            let result          = List<'T>(initialCapacity)
             let mutable cps     = ps
 
             match p cps with
             | Failure _         -> ()
             | Success (f, fps)  ->
-                result  <- f::result
+                result.Add f
                 cps     <- fps
                 while 
                     match sep cps with
@@ -421,302 +459,301 @@ module MiniParser =
                             rems <- Some ems
                             false
                         | Success (v, vps)  ->
-                            result  <- v::result
+                            result.Add v
                             cps     <- vps
                             true
                     do
                     ()
             match rems with
-            | None      -> success result cps
+            | None      -> success (result |> Seq.toList) cps
             | Some ems  -> failure ems ps
 
 
-open MiniParser
 
-type private JsonParserNew(jsonText:string, cultureInfo : CultureInfo option, tolerateErrors : bool) = 
+    type JsonParserNew(jsonText:string, cultureInfo : CultureInfo option, tolerateErrors : bool) = 
 
-    let satisfy1To9 c = c >= '1' && c <= '9'
+        let satisfy1To9 c = c >= '1' && c <= '9'
 
-    let hex2int c = 
-        match c with
-        | _ when c >= '0' && c <= '9'   -> (int c) - (int '0')     
-        | _ when c >= 'a' && c <= 'f'   -> (int c) - (int 'a') + 10
-        | _ when c >= 'A' && c <= 'F'   -> (int c) - (int 'A') + 10
-        | _                             -> 0
+        let hex2int c = 
+            match c with
+            | _ when c >= '0' && c <= '9'   -> (int c) - (int '0')     
+            | _ when c >= 'a' && c <= 'f'   -> (int c) - (int 'a') + 10
+            | _ when c >= 'A' && c <= 'F'   -> (int c) - (int 'A') + 10
+            | _                             -> 0
         
-    let makeDouble (d : int) (i : int64) (n :int) (f : float) (e : float) = 
-        ((float d) * (pown 10. n) + (float i) + f)*e
+        let makeDouble (d : int) (i : int64) (n :int) (f : float) (e : float) = 
+            ((float d) * (pown 10. n) + (float i) + f)*e
 
-    let p_ws            : Parser<unit, unit>        = spaces
-    let p_token token   : Parser<unit, unit>        = skipChar token
-    let p_wstoken token : Parser<unit, unit>        = attempt (p_ws >>. p_token token)
+        let p_ws            : Parser<unit, unit>        = spaces
+        let p_token token   : Parser<unit, unit>        = skipChar token
+        let p_wstoken token : Parser<unit, unit>        = attempt (p_ws >>. p_token token)
 
-    let p_escape        : Parser<char, unit>      =  
-            anyOf """"\/bfnrt"""
-            |>> function
-                | 'b' -> '\b'
-                | 'f' -> '\f'
-                | 'n' -> '\n'
-                | 'r' -> '\r'
-                | 't' -> '\t'
-                | c   -> c
-    let p_unicodeEscape : Parser<char, unit>      =
-        p_token 'u' >>. pipe4 hex hex hex hex (fun h3 h2 h1 h0 -> 
-            (hex2int h3)*0x1000 + (hex2int h2)*0x100 + (hex2int h1)*0x10 + hex2int h0 |> char
-        )
-    let p_char          : Parser<char, unit>        =
-        choice
-            [
-                satisfy (fun ch -> ch <> '"' && ch <> '\\')
-                p_token '\\' >>. (p_escape <|> p_unicodeEscape)
-            ]
-    let p_stringLiteral : Parser<string, unit>      =
-        between (p_token '"') (p_token '"') (manyChars p_char)
+        let p_escape        : Parser<char, unit>      =  
+                anyOf """"\/bfnrt"""
+                |>> function
+                    | 'b' -> '\b'
+                    | 'f' -> '\f'
+                    | 'n' -> '\n'
+                    | 'r' -> '\r'
+                    | 't' -> '\t'
+                    | c   -> c
+        let p_unicodeEscape : Parser<char, unit>      =
+            p_token 'u' >>. pipe4 hex hex hex hex (fun h3 h2 h1 h0 -> 
+                (hex2int h3)*0x1000 + (hex2int h2)*0x100 + (hex2int h1)*0x10 + hex2int h0 |> char
+            )
+        let p_char          : Parser<char, unit>        =
+            choice
+                [
+                    satisfy (fun ch -> ch <> '"' && ch <> '\\')
+                    p_token '\\' >>. (p_escape <|> p_unicodeEscape)
+                ]
+        let p_stringLiteral : Parser<string, unit>      =
+            between (p_token '"') (p_token '"') (manyChars p_char)
 
-    let p_digit1To9     : Parser<char, unit>        = satisfy satisfy1To9
-    let p_digit         : Parser<int, unit>         = digit |>> hex2int
-    let p_int           : Parser<int64*int, unit>   = many p_digit |>> (fun digits ->
-                            let mutable result = 0L
-                            for d in digits do
-                                result <- 10L * result + (int64 d)
-                            result,digits.Length
-                        )
-    let p_e             : Parser<float, unit>       = 
-        skipAnyOf "eE" >>. (choice [charReturn '-' 0.1;charReturn '+' 10.] <|> preturn 10.)
-    let p_exponent      : Parser<float, unit>       = 
-        p_e .>>. p_int |>> (fun (exp, (i,_)) -> pown exp (int i)) <|> preturn 1.
-    let p_fraction      : Parser<float, unit>       = 
-        (p_token '.' >>. (p_int |>> (fun (v,n) -> (float v) * (pown 0.1 n)))) <|> preturn 0.
-    let p_sign          : Parser<float, unit>       = 
-        (charReturn '-' -1.) <|> preturn 1.
-    let p_digit19       : Parser<int, unit>         = 
-        p_digit1To9 |>> hex2int
-    let p_numberLiteral : Parser<float, unit>       = 
-        p_sign .>>. choice 
+        let p_digit1To9     : Parser<char, unit>        = satisfy satisfy1To9
+        let p_digit         : Parser<int, unit>         = digit |>> hex2int
+        let p_int           : Parser<int64*int, unit>   = many p_digit |>> (fun digits ->
+                                let mutable result = 0L
+                                for d in digits do
+                                    result <- 10L * result + (int64 d)
+                                result,digits.Length
+                            )
+        let p_e             : Parser<float, unit>       = 
+            skipAnyOf "eE" >>. (choice [charReturn '-' 0.1;charReturn '+' 10.] <|> preturn 10.)
+        let p_exponent      : Parser<float, unit>       = 
+            p_e .>>. p_int |>> (fun (exp, (i,_)) -> pown exp (int i)) <|> preturn 1.
+        let p_fraction      : Parser<float, unit>       = 
+            (p_token '.' >>. (p_int |>> (fun (v,n) -> (float v) * (pown 0.1 n)))) <|> preturn 0.
+        let p_sign          : Parser<float, unit>       = 
+            (charReturn '-' -1.) <|> preturn 1.
+        let p_digit19       : Parser<int, unit>         = 
+            p_digit1To9 |>> hex2int
+        let p_numberLiteral : Parser<float, unit>       = 
+            p_sign .>>. choice 
+                            [
+                                // JSON doesn't allow numbers like 0123 (has to be 123).
+                                // This is probably to avoid issues with octals numbers
+                                pipe3 (p_token '0') p_fraction p_exponent (fun _ f e -> makeDouble 0 0L 0 f e)
+                                pipe4 p_digit19 p_int p_fraction p_exponent (fun d (v,n) f e -> makeDouble d v n f e)
+                            ] |>> (fun (s,n) -> s*n)
+
+
+        let p_null          : Parser<JsonValue, unit>    = stringReturn "null"   JsonValue.Null
+        let p_true          : Parser<JsonValue, unit>    = stringReturn "true"   <| JsonValue.Boolean true
+        let p_false         : Parser<JsonValue, unit>    = stringReturn "false"  <| JsonValue.Boolean false
+        let p_string        : Parser<JsonValue, unit>    = p_stringLiteral       |>> JsonValue.String
+        let p_number        : Parser<JsonValue, unit>    = p_numberLiteral       |>> JsonValue.Float
+
+        let rec p_value     : Parser<JsonValue, unit>    = fun cs -> 
+            cs 
+            |>  (p_ws 
+                    >>. choice
                         [
-                            // JSON doesn't allow numbers like 0123 (has to be 123).
-                            // This is probably to avoid issues with octals numbers
-                            pipe3 (p_token '0') p_fraction p_exponent (fun _ f e -> makeDouble 0 0L 0 f e)
-                            pipe4 p_digit19 p_int p_fraction p_exponent (fun d (v,n) f e -> makeDouble d v n f e)
-                        ] |>> (fun (s,n) -> s*n)
+                            p_null 
+                            p_true
+                            p_false
+                            p_string
+                            p_number  
+                            p_object
+                            p_array  
+                        ])
+        and p_member        : Parser<string*JsonValue, unit> = 
+            p_ws >>. p_stringLiteral .>> p_ws .>> (p_token ':') .>>. p_value
+        and p_object        : Parser<JsonValue, unit>        = 
+            between (p_token '{') (p_wstoken '}') (sepBy p_member (p_wstoken ',') |>> (List.toArray >> JsonValue.Record))
+        and p_array         : Parser<JsonValue, unit>        = 
+            between (p_token '[') (p_wstoken ']') (sepBy p_value (p_wstoken ',') |>> (List.toArray >> JsonValue.Array))
 
-
-    let p_null          : Parser<JsonValue, unit>    = stringReturn "null"   JsonValue.Null
-    let p_true          : Parser<JsonValue, unit>    = stringReturn "true"   <| JsonValue.Boolean true
-    let p_false         : Parser<JsonValue, unit>    = stringReturn "false"  <| JsonValue.Boolean false
-    let p_string        : Parser<JsonValue, unit>    = p_stringLiteral       |>> JsonValue.String
-    let p_number        : Parser<JsonValue, unit>    = p_numberLiteral       |>> JsonValue.Float
-
-    let rec p_value     : Parser<JsonValue, unit>    = fun cs -> 
-        cs 
-        |>  (p_ws 
-                >>. choice
-                    [
-                        p_null  
-                        p_true
-                        p_false
-                        p_string
-                        p_number  
-                        p_object
-                        p_array  
-                    ])
-    and p_member        : Parser<string*JsonValue, unit> = 
-        p_ws >>. p_stringLiteral .>> p_ws .>> (p_token ':') .>>. p_value
-    and p_object        : Parser<JsonValue, unit>        = 
-        between (p_token '{') (p_wstoken '}') (sepBy p_member (p_wstoken ',') |>> (List.toArray >> JsonValue.Record))
-    and p_array         : Parser<JsonValue, unit>        = 
-        between (p_token '[') (p_wstoken ']') (sepBy p_value (p_wstoken ',') |>> (List.toArray >> JsonValue.Array))
-
-    let p_root          : Parser<JsonValue, unit>        = p_ws >>. choice [p_object;p_array]
+        let p_root          : Parser<JsonValue, unit>        = p_ws >>. choice [p_object;p_array]
     
-    let p_json  = p_root .>> p_ws .>> eof
-    let p_jsons = (many p_root) .>> p_ws .>> eof
+        let p_json  = p_root .>> p_ws .>> eof
+        let p_jsons = (many p_root) .>> p_ws .>> eof
 
-    member x.Parse () = 
-        match run p_json jsonText with
-        | Success (json, _)     -> json
-        | Failure (ems, ps)     -> failwith <| prettify ems ps 
+        member x.Parse () = 
+            match run p_json jsonText with
+            | Success (json, _)     -> json
+            | Failure (ems, ps)     -> failwith <| prettify ems ps 
 
-    member x.ParseMultiple () = 
-        match run p_jsons jsonText with
-        | Success (json, _)     -> json
-        | Failure (ems, ps)     -> failwith <| prettify ems ps 
+        member x.ParseMultiple () = 
+            match run p_jsons jsonText with
+            | Success (json, _)     -> json
+            | Failure (ems, ps)     -> failwith <| prettify ems ps 
 
-type private JsonParserOld(jsonText:string, cultureInfo, tolerateErrors) =
+    type JsonParserOld(jsonText:string, cultureInfo, tolerateErrors) =
 
-    let cultureInfo = defaultArg cultureInfo CultureInfo.InvariantCulture
+        let cultureInfo = defaultArg cultureInfo CultureInfo.InvariantCulture
 
-    let mutable i = 0
-    let s = jsonText
+        let mutable i = 0
+        let s = jsonText
 
-    // Helper functions
-    let skipWhitespace() =
-      while i < s.Length && Char.IsWhiteSpace s.[i] do
-        i <- i + 1
-    let decimalSeparator = cultureInfo.NumberFormat.NumberDecimalSeparator.[0]
-    let isNumChar c = 
-      Char.IsDigit c || c=decimalSeparator || c='e' || c='E' || c='+' || c='-'
-    let throw() = 
-      let msg = 
-        sprintf 
-          "Invalid Json starting at character %d, snippet = \n----\n%s\n-----\njson = \n------\n%s\n-------" 
-          i (jsonText.[(max 0 (i-10))..(min (jsonText.Length-1) (i+10))]) (if jsonText.Length > 1000 then jsonText.Substring(0, 1000) else jsonText)
-      failwith msg
-    let ensure cond = 
-      if not cond then throw()  
-
-    // Recursive descent parser for JSON that uses global mutable index
-    let rec parseValue() =
-        skipWhitespace()
-        ensure(i < s.Length)
-        match s.[i] with
-        | '"' -> JsonValue.String(parseString())
-        | '-' -> parseNum()
-        | c when Char.IsDigit(c) -> parseNum()
-        | '{' -> parseObject()
-        | '[' -> parseArray()
-        | 't' -> parseLiteral("true", JsonValue.Boolean true)
-        | 'f' -> parseLiteral("false", JsonValue.Boolean false)
-        | 'n' -> parseLiteral("null", JsonValue.Null)
-        | _ -> throw()
-
-    and parseString() =
-        ensure(i < s.Length && s.[i] = '"')
-        i <- i + 1
-        let buf = new StringBuilder()
-        while i < s.Length && s.[i] <> '"' do
-            if s.[i] = '\\' then
-                ensure(i+1 < s.Length)
-                match s.[i+1] with
-                | 'b' -> buf.Append('\b') |> ignore
-                | 'f' -> buf.Append('\f') |> ignore
-                | 'n' -> buf.Append('\n') |> ignore
-                | 't' -> buf.Append('\t') |> ignore
-                | 'r' -> buf.Append('\r') |> ignore
-                | '\\' -> buf.Append('\\') |> ignore
-                | '/' -> buf.Append('/') |> ignore
-                | '"' -> buf.Append('"') |> ignore
-                | 'u' ->
-                    ensure(i+5 < s.Length)
-                    let hexdigit d = 
-                        if d >= '0' && d <= '9' then int32 d - int32 '0'
-                        elif d >= 'a' && d <= 'f' then int32 d - int32 'a' + 10
-                        elif d >= 'A' && d <= 'F' then int32 d - int32 'A' + 10
-                        else failwith "hexdigit" 
-                    let unicodeGraphShort (s:string) =
-                        if s.Length <> 4 then failwith "unicodegraph";
-                        uint16 (hexdigit s.[0] * 4096 + hexdigit s.[1] * 256 + hexdigit s.[2] * 16 + hexdigit s.[3])
-                    let makeUnicodeChar (c:int) =  [| byte(c % 256); byte(c / 256) |]
-                    let bytes = makeUnicodeChar(int(unicodeGraphShort(s.Substring(i+2, 4))))
-                    let chars = UnicodeEncoding.Unicode.GetChars(bytes)
-                    buf.Append(chars) |> ignore
-                    i <- i + 4  // the \ and u will also be skipped past further below
-                | _ -> throw()
-                i <- i + 2  // skip past \ and next char
-            else
-                buf.Append(s.[i]) |> ignore
-                i <- i + 1
-        ensure(i < s.Length && s.[i] = '"')
-        i <- i + 1
-        buf.ToString()
-
-    and parseNum() =
-        let start = i
-        while i < s.Length && isNumChar(s.[i]) do
+        // Helper functions
+        let skipWhitespace() =
+          while i < s.Length && Char.IsWhiteSpace s.[i] do
             i <- i + 1
-        let len = i - start
-        match TextConversions.AsDecimal cultureInfo (s.Substring(start,len)) with  
-        | Some x -> JsonValue.Number x
-        | _ -> 
-            match TextConversions.AsFloat [| |] (*useNoneForMissingValues*)false cultureInfo (s.Substring(start,len)) with  
-            | Some x -> JsonValue.Float x
+        let decimalSeparator = cultureInfo.NumberFormat.NumberDecimalSeparator.[0]
+        let isNumChar c = 
+          Char.IsDigit c || c=decimalSeparator || c='e' || c='E' || c='+' || c='-'
+        let throw() = 
+          let msg = 
+            sprintf 
+              "Invalid Json starting at character %d, snippet = \n----\n%s\n-----\njson = \n------\n%s\n-------" 
+              i (jsonText.[(max 0 (i-10))..(min (jsonText.Length-1) (i+10))]) (if jsonText.Length > 1000 then jsonText.Substring(0, 1000) else jsonText)
+          failwith msg
+        let ensure cond = 
+          if not cond then throw()  
+
+        // Recursive descent parser for JSON that uses global mutable index
+        let rec parseValue() =
+            skipWhitespace()
+            ensure(i < s.Length)
+            match s.[i] with
+            | '"' -> JsonValue.String(parseString())
+            | '-' -> parseNum()
+            | c when Char.IsDigit(c) -> parseNum()
+            | '{' -> parseObject()
+            | '[' -> parseArray()
+            | 't' -> parseLiteral("true", JsonValue.Boolean true)
+            | 'f' -> parseLiteral("false", JsonValue.Boolean false)
+            | 'n' -> parseLiteral("null", JsonValue.Null)
             | _ -> throw()
 
-    and parsePair() =
-        let key = parseString().Trim('"')
-        skipWhitespace()
-        ensure(i < s.Length && s.[i] = ':')
-        i <- i + 1
-        skipWhitespace()
-        key, parseValue()
-
-    and parseEllipsis() =
-        let mutable openingBrace = false
-        if i < s.Length && s.[i] = '{' then
-            openingBrace <- true
+        and parseString() =
+            ensure(i < s.Length && s.[i] = '"')
             i <- i + 1
-            skipWhitespace()
-        while i < s.Length && s.[i] = '.' do
-            i <- i + 1
-            skipWhitespace()
-        if openingBrace && i < s.Length && s.[i] = '}' then
-            i <- i + 1
-            skipWhitespace()
-
-    and parseObject() =
-        ensure(i < s.Length && s.[i] = '{')
-        i <- i + 1
-        skipWhitespace()
-        let pairs = ResizeArray<_>()
-        if i < s.Length && s.[i] = '"' then
-            pairs.Add(parsePair())
-            skipWhitespace()
-            while i < s.Length && s.[i] = ',' do
-                i <- i + 1
-                skipWhitespace()
-                if tolerateErrors && s.[i] = '}' then
-                    () // tolerate a trailing comma, even though is not valid json
+            let buf = new StringBuilder()
+            while i < s.Length && s.[i] <> '"' do
+                if s.[i] = '\\' then
+                    ensure(i+1 < s.Length)
+                    match s.[i+1] with
+                    | 'b' -> buf.Append('\b') |> ignore
+                    | 'f' -> buf.Append('\f') |> ignore
+                    | 'n' -> buf.Append('\n') |> ignore
+                    | 't' -> buf.Append('\t') |> ignore
+                    | 'r' -> buf.Append('\r') |> ignore
+                    | '\\' -> buf.Append('\\') |> ignore
+                    | '/' -> buf.Append('/') |> ignore
+                    | '"' -> buf.Append('"') |> ignore
+                    | 'u' ->
+                        ensure(i+5 < s.Length)
+                        let hexdigit d = 
+                            if d >= '0' && d <= '9' then int32 d - int32 '0'
+                            elif d >= 'a' && d <= 'f' then int32 d - int32 'a' + 10
+                            elif d >= 'A' && d <= 'F' then int32 d - int32 'A' + 10
+                            else failwith "hexdigit" 
+                        let unicodeGraphShort (s:string) =
+                            if s.Length <> 4 then failwith "unicodegraph";
+                            uint16 (hexdigit s.[0] * 4096 + hexdigit s.[1] * 256 + hexdigit s.[2] * 16 + hexdigit s.[3])
+                        let makeUnicodeChar (c:int) =  [| byte(c % 256); byte(c / 256) |]
+                        let bytes = makeUnicodeChar(int(unicodeGraphShort(s.Substring(i+2, 4))))
+                        let chars = UnicodeEncoding.Unicode.GetChars(bytes)
+                        buf.Append(chars) |> ignore
+                        i <- i + 4  // the \ and u will also be skipped past further below
+                    | _ -> throw()
+                    i <- i + 2  // skip past \ and next char
                 else
-                    pairs.Add(parsePair())
-                    skipWhitespace()
-        if tolerateErrors && i < s.Length && s.[i] <> '}' then
-            parseEllipsis() // tolerate ... or {...}
-        ensure(i < s.Length && s.[i] = '}')
-        i <- i + 1
-        JsonValue.Record(pairs |> Array.ofSeq)
+                    buf.Append(s.[i]) |> ignore
+                    i <- i + 1
+            ensure(i < s.Length && s.[i] = '"')
+            i <- i + 1
+            buf.ToString()
 
-    and parseArray() =
-        ensure(i < s.Length && s.[i] = '[')
-        i <- i + 1
-        skipWhitespace()
-        let vals = ResizeArray<_>()
-        if i < s.Length && s.[i] <> ']' then
-            vals.Add(parseValue())
+        and parseNum() =
+            let start = i
+            while i < s.Length && isNumChar(s.[i]) do
+                i <- i + 1
+            let len = i - start
+            match TextConversions.AsDecimal cultureInfo (s.Substring(start,len)) with  
+            | Some x -> JsonValue.Number x
+            | _ -> 
+                match TextConversions.AsFloat [| |] (*useNoneForMissingValues*)false cultureInfo (s.Substring(start,len)) with  
+                | Some x -> JsonValue.Float x
+                | _ -> throw()
+
+        and parsePair() =
+            let key = parseString().Trim('"')
             skipWhitespace()
-            while i < s.Length && s.[i] = ',' do
+            ensure(i < s.Length && s.[i] = ':')
+            i <- i + 1
+            skipWhitespace()
+            key, parseValue()
+
+        and parseEllipsis() =
+            let mutable openingBrace = false
+            if i < s.Length && s.[i] = '{' then
+                openingBrace <- true
                 i <- i + 1
                 skipWhitespace()
+            while i < s.Length && s.[i] = '.' do
+                i <- i + 1
+                skipWhitespace()
+            if openingBrace && i < s.Length && s.[i] = '}' then
+                i <- i + 1
+                skipWhitespace()
+
+        and parseObject() =
+            ensure(i < s.Length && s.[i] = '{')
+            i <- i + 1
+            skipWhitespace()
+            let pairs = ResizeArray<_>()
+            if i < s.Length && s.[i] = '"' then
+                pairs.Add(parsePair())
+                skipWhitespace()
+                while i < s.Length && s.[i] = ',' do
+                    i <- i + 1
+                    skipWhitespace()
+                    if tolerateErrors && s.[i] = '}' then
+                        () // tolerate a trailing comma, even though is not valid json
+                    else
+                        pairs.Add(parsePair())
+                        skipWhitespace()
+            if tolerateErrors && i < s.Length && s.[i] <> '}' then
+                parseEllipsis() // tolerate ... or {...}
+            ensure(i < s.Length && s.[i] = '}')
+            i <- i + 1
+            JsonValue.Record(pairs |> Array.ofSeq)
+
+        and parseArray() =
+            ensure(i < s.Length && s.[i] = '[')
+            i <- i + 1
+            skipWhitespace()
+            let vals = ResizeArray<_>()
+            if i < s.Length && s.[i] <> ']' then
                 vals.Add(parseValue())
                 skipWhitespace()
-        if tolerateErrors && i < s.Length && s.[i] <> ']' then
-            parseEllipsis() // tolerate ... or {...}
-        ensure(i < s.Length && s.[i] = ']')
-        i <- i + 1
-        JsonValue.Array(vals |> Seq.toArray)
+                while i < s.Length && s.[i] = ',' do
+                    i <- i + 1
+                    skipWhitespace()
+                    vals.Add(parseValue())
+                    skipWhitespace()
+            if tolerateErrors && i < s.Length && s.[i] <> ']' then
+                parseEllipsis() // tolerate ... or {...}
+            ensure(i < s.Length && s.[i] = ']')
+            i <- i + 1
+            JsonValue.Array(vals |> Seq.toArray)
 
-    and parseLiteral(expected, r) =
-        ensure(i+expected.Length < s.Length)
-        for j in 0 .. expected.Length - 1 do
-            ensure(s.[i+j] = expected.[j])
-        i <- i + expected.Length
-        r
+        and parseLiteral(expected, r) =
+            ensure(i+expected.Length < s.Length)
+            for j in 0 .. expected.Length - 1 do
+                ensure(s.[i+j] = expected.[j])
+            i <- i + expected.Length
+            r
 
-    // Start by parsing the top-level value
-    member x.Parse() = 
-        let value = parseValue()
-        skipWhitespace()
-        if i <> s.Length then
-            throw()
-        value
+        // Start by parsing the top-level value
+        member x.Parse() = 
+            let value = parseValue()
+            skipWhitespace()
+            if i <> s.Length then
+                throw()
+            value
 
-    member x.ParseMultiple() = 
-        seq {
-            while i <> s.Length do
-                yield parseValue()
-                skipWhitespace() 
-        }
+        member x.ParseMultiple() = 
+            seq {
+                while i <> s.Length do
+                    yield parseValue()
+                    skipWhitespace() 
+            }
 
-type private JsonParser = JsonParserNew
+type private JsonParser = Parser.JsonParserNew
 
 type JsonValue with
 
