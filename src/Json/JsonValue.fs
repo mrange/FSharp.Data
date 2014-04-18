@@ -170,6 +170,7 @@ module Parser =
                     
     type ErrorMessage =
         | Expected      of string
+        | NotExpected   of string
         | Group         of ErrorMessage list
     
     type ParserResult<'Result,'UserState> =
@@ -277,11 +278,6 @@ module Parser =
             if not ss.IsEmpty then success (ss.Char 0) ps
             else failure ems ps
 
-    let skipSatisfy (t : char->bool) : Parser<unit, 'UserState> = 
-        let test ch _ = t ch
-        let ems = Expected "Satisfy"
-        skipSatisfyImpl test ems
-
     let satisfy (t : char->bool) : Parser<char, 'UserState> = 
         let test ch _ = t ch
         let ems = Expected "Satisfy"
@@ -299,6 +295,13 @@ module Parser =
         let set         = chars |> Set.ofArray
         let ems         = chars |> Array.map (fun c -> Expected <| c.ToString()) |> Seq.toList |> Group
         let test ch _   = set.Contains ch
+        satisfyImpl test ems
+
+    let noneOf (s : string) : Parser<char, 'UserState> = 
+        let chars       = s.ToCharArray () 
+        let set         = chars |> Set.ofArray
+        let ems         = chars |> Array.map (fun c -> NotExpected <| c.ToString()) |> Seq.toList |> Group
+        let test ch _   = not <| set.Contains ch
         satisfyImpl test ems
 
     let digit : Parser<char, 'UserState> =
@@ -473,8 +476,6 @@ module Parser =
 
     type JsonParserNew(jsonText:string, cultureInfo : CultureInfo option, tolerateErrors : bool) = 
 
-        let satisfy1To9 c = c >= '1' && c <= '9'
-
         let hex2int c = 
             match c with
             | _ when c >= '0' && c <= '9'   -> (int c) - (int '0')     
@@ -505,13 +506,13 @@ module Parser =
         let p_char          : Parser<char, unit>        =
             choice
                 [
-                    satisfy (fun ch -> ch <> '"' && ch <> '\\')
+                    noneOf """"\"""
                     p_token '\\' >>. (p_escape <|> p_unicodeEscape)
                 ]
         let p_stringLiteral : Parser<string, unit>      =
             between (p_token '"') (p_token '"') (manyChars p_char)
 
-        let p_digit1To9     : Parser<char, unit>        = satisfy satisfy1To9
+        let p_digit1To9     : Parser<char, unit>        = anyOf "123456789"
         let p_digit         : Parser<int, unit>         = digit |>> hex2int
         let p_int           : Parser<int64*int, unit>   = many p_digit |>> (fun digits ->
                                 let mutable result = 0L

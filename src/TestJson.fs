@@ -299,8 +299,8 @@ let runTestCases (parser : string->JsonValue) =
 
     let testCases = 
         manualTestCases
-//        generatedTestCases
-//        manualTestCases@generatedTestCases
+        generatedTestCases
+        manualTestCases@generatedTestCases
 
     let failures = ref 0
 
@@ -328,6 +328,6 @@ let main argv =
     printfn "Testing new Parser"
     runTestCases <| fun json -> let p = FSharp.Data.Parser.JsonParserNew (json, None, false) in p.Parse ()
 
-    printfn "Testing old Parser"
-    runTestCases <| fun json -> let p = FSharp.Data.Parser.JsonParserOld (json, None, false) in p.Parse ()
+//    printfn "Testing old Parser"
+//    runTestCases <| fun json -> let p = FSharp.Data.Parser.JsonParserOld (json, None, false) in p.Parse ()
     0
