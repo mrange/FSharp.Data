@@ -108,6 +108,8 @@ module Parser =
     open System.Diagnostics
     open System.Collections.Generic
     
+    // Generic parsers functions (similar look to FParsec)
+
     let initialCapacity = 16
 
     [<Struct>]
@@ -183,9 +185,46 @@ module Parser =
         let ps = ParserState(s, 0, ())
         p ps
 
-    let prettify (_ : ErrorMessage) (ps : ParserState<'UserState>) =
-        // TODO:
-        sprintf "Parse failed at %d" ps.Position
+    let prettify (ems : ErrorMessage) (ps : ParserState<'UserState>) =
+        let expected    = HashSet<string>()
+        let notExpected = HashSet<string>()
+        let rec collectMessages (ems : ErrorMessage) = 
+            match ems with
+            | Expected      m   ->  ignore <| expected.Add m
+            | NotExpected   m   ->  ignore <| notExpected.Add m
+            | Group         emss->  for ems in emss do 
+                                        collectMessages ems
+        collectMessages ems
+        let input       =   System.String 
+                                (
+                                    ps.Input 
+                                    |> Seq.map (fun ch -> if Char.IsWhiteSpace ch then ' ' else ch)
+                                    |> Seq.toArray
+                                )
+        let pos         = ps.Position
+        let snippetSize = 80
+        let midSnippet  = snippetSize / 2
+        let beginSnippet= max 0 <| pos - midSnippet
+        let endSnippet  = min input.Length <| pos + midSnippet
+        let snippet     = input.Substring(beginSnippet, endSnippet - beginSnippet)
+        let indicator   = System.String ('-', pos - beginSnippet)
+
+        let e   = System.String.Join(", ", expected     |> Seq.sort |> Seq.toArray)
+        let ne  = System.String.Join(", ", notExpected  |> Seq.sort |> Seq.toArray)
+        let reason =
+            match e, ne with
+            | "","" -> ""
+            | l,""  -> "expecting " + l
+            | "",r  -> "didn't expect " + r
+            | l,r   -> "expected " + l + " and didn't expect " +  r
+
+        sprintf 
+            "Parse error at position: %d, input:\n%s\n%s^\nFound '%s' but %s" 
+            pos 
+            snippet 
+            indicator 
+            (input.[pos].ToString())
+            reason 
 
     let success (v : 'T) ps = Success (v, ps)
     let failure ems      ps = Failure (ems, ps)
@@ -212,7 +251,7 @@ module Parser =
 
     let skipChar (c : char): Parser<unit, 'UserState> = 
         let test ch _ = ch = c
-        let ems = Expected <| c.ToString()
+        let ems = Expected <| "'" + c.ToString() + "'"
         fun ps ->
             let ss,ps = ps.Match 1 1 test
             if not ss.IsEmpty then success () ps
@@ -278,29 +317,24 @@ module Parser =
             if not ss.IsEmpty then success (ss.Char 0) ps
             else failure ems ps
 
-    let satisfy (t : char->bool) : Parser<char, 'UserState> = 
-        let test ch _ = t ch
-        let ems = Expected "Satisfy"
-        satisfyImpl test ems
-        
     let skipAnyOf (s : string) : Parser<unit, 'UserState> = 
         let chars       = s.ToCharArray () 
         let set         = chars |> Set.ofArray
-        let ems         = chars |> Array.map (fun c -> Expected <| c.ToString()) |> Seq.toList |> Group
+        let ems         = chars |> Array.map (fun c -> Expected <| "'" + c.ToString() + "'") |> Seq.toList |> Group
         let test ch _   = set.Contains ch
         skipSatisfyImpl test ems
 
     let anyOf (s : string) : Parser<char, 'UserState> = 
         let chars       = s.ToCharArray () 
         let set         = chars |> Set.ofArray
-        let ems         = chars |> Array.map (fun c -> Expected <| c.ToString()) |> Seq.toList |> Group
+        let ems         = chars |> Array.map (fun c -> Expected <| "'" + c.ToString() + "'") |> Seq.toList |> Group
         let test ch _   = set.Contains ch
         satisfyImpl test ems
 
     let noneOf (s : string) : Parser<char, 'UserState> = 
         let chars       = s.ToCharArray () 
         let set         = chars |> Set.ofArray
-        let ems         = chars |> Array.map (fun c -> NotExpected <| c.ToString()) |> Seq.toList |> Group
+        let ems         = chars |> Array.map (fun c -> NotExpected <| "'" + c.ToString() + "'") |> Seq.toList |> Group
         let test ch _   = not <| set.Contains ch
         satisfyImpl test ems
 
@@ -396,7 +430,7 @@ module Parser =
 
     let charReturn (c : char) (v : 'T) : Parser<'T, 'UserState> = 
         let test ch _   = c = ch
-        let ems         = Expected <| c.ToString()
+        let ems         = Expected <| "'" + c.ToString() + "'"
         fun ps ->
             let ss,ps = ps.Match 1 1 test
             if not ss.IsEmpty then success v ps
@@ -405,7 +439,7 @@ module Parser =
     let stringReturn (s : string) (v : 'T) : Parser<'T, 'UserState> = 
         let test ch p   = s.[p] = ch
         let length      = s.Length
-        let ems         = Expected s
+        let ems         = Expected <| "'" + s + "'"
         fun ps ->
             let ss,ps = ps.Match length length test
             if not ss.IsEmpty then success v ps
@@ -472,104 +506,106 @@ module Parser =
             | None      -> success (result |> Seq.toList) cps
             | Some ems  -> failure ems ps
 
+    // JSON parsers specifics (should be FParsec compatible)
+
+    let hex2int c = 
+        match c with
+        | _ when c >= '0' && c <= '9'   -> (int c) - (int '0')     
+        | _ when c >= 'a' && c <= 'f'   -> (int c) - (int 'a') + 10
+        | _ when c >= 'A' && c <= 'F'   -> (int c) - (int 'A') + 10
+        | _                             -> 0
+        
+    let makeDouble (d : int) (i : int64) (n :int) (f : float) (e : float) = 
+        ((float d) * (pown 10. n) + (float i) + f)*e
+
+    let p_ws            : Parser<unit, unit>        = spaces
+    let p_token token   : Parser<unit, unit>        = skipChar token
+    let p_wstoken token : Parser<unit, unit>        = attempt (p_ws >>. p_token token)
+
+    let p_escape        : Parser<char, unit>      =  
+            anyOf """"\/bfnrt"""
+            |>> function
+                | 'b' -> '\b'
+                | 'f' -> '\f'
+                | 'n' -> '\n'
+                | 'r' -> '\r'
+                | 't' -> '\t'
+                | c   -> c
+    let p_unicodeEscape : Parser<char, unit>      =
+        p_token 'u' >>. pipe4 hex hex hex hex (fun h3 h2 h1 h0 -> 
+            (hex2int h3)*0x1000 + (hex2int h2)*0x100 + (hex2int h1)*0x10 + hex2int h0 |> char
+        )
+    let p_char          : Parser<char, unit>        =
+        choice
+            [
+                noneOf """"\"""
+                p_token '\\' >>. (p_escape <|> p_unicodeEscape)
+            ]
+    let p_stringLiteral : Parser<string, unit>      =
+        between (p_token '"') (p_token '"') (manyChars p_char)
+
+    let p_digit1To9     : Parser<char, unit>        = anyOf "123456789"
+    let p_digit         : Parser<int, unit>         = digit |>> hex2int
+    let p_int           : Parser<int64*int, unit>   = many p_digit |>> (fun digits ->
+                            let mutable result = 0L
+                            for d in digits do
+                                result <- 10L * result + (int64 d)
+                            result,digits.Length
+                        )
+    let p_e             : Parser<float, unit>       = 
+        skipAnyOf "eE" >>. (choice [charReturn '-' 0.1;charReturn '+' 10.] <|> preturn 10.)
+    let p_exponent      : Parser<float, unit>       = 
+        p_e .>>. p_int |>> (fun (exp, (i,_)) -> pown exp (int i)) <|> preturn 1.
+    let p_fraction      : Parser<float, unit>       = 
+        (p_token '.' >>. (p_int |>> (fun (v,n) -> (float v) * (pown 0.1 n)))) <|> preturn 0.
+    let p_sign          : Parser<float, unit>       = 
+        (charReturn '-' -1.) <|> preturn 1.
+    let p_digit19       : Parser<int, unit>         = 
+        p_digit1To9 |>> hex2int
+    let p_numberLiteral : Parser<float, unit>       = 
+        p_sign .>>. choice 
+                        [
+                            // JSON doesn't allow numbers like 0123 (has to be 123).
+                            // This is probably to avoid issues with octals numbers
+                            pipe3 (p_token '0') p_fraction p_exponent (fun _ f e -> makeDouble 0 0L 0 f e)
+                            pipe4 p_digit19 p_int p_fraction p_exponent (fun d (v,n) f e -> makeDouble d v n f e)
+                        ] |>> (fun (s,n) -> s*n)
+
+
+    let p_null          : Parser<JsonValue, unit>    = stringReturn "null"   JsonValue.Null
+    let p_true          : Parser<JsonValue, unit>    = stringReturn "true"   <| JsonValue.Boolean true
+    let p_false         : Parser<JsonValue, unit>    = stringReturn "false"  <| JsonValue.Boolean false
+    let p_string        : Parser<JsonValue, unit>    = p_stringLiteral       |>> JsonValue.String
+    let p_number        : Parser<JsonValue, unit>    = p_numberLiteral       |>> JsonValue.Float
+
+    let rec p_value     : Parser<JsonValue, unit>    = fun cs -> 
+        cs 
+        |>  (p_ws 
+                >>. choice
+                    [
+                        p_null 
+                        p_true
+                        p_false
+                        p_string
+                        p_number  
+                        p_object
+                        p_array  
+                    ])
+    and p_member        : Parser<string*JsonValue, unit> = 
+        p_ws >>. p_stringLiteral .>> p_ws .>> (p_token ':') .>>. p_value
+    and p_object        : Parser<JsonValue, unit>        = 
+        between (p_token '{') (p_wstoken '}') (sepBy p_member (p_wstoken ',') |>> (List.toArray >> JsonValue.Record))
+    and p_array         : Parser<JsonValue, unit>        = 
+        between (p_token '[') (p_wstoken ']') (sepBy p_value (p_wstoken ',') |>> (List.toArray >> JsonValue.Array))
+
+    let p_root          : Parser<JsonValue, unit>        = p_ws >>. choice [p_object;p_array]
+    
+    let p_json  = p_root .>> p_ws .>> eof
+    let p_jsons = (many p_root) .>> p_ws .>> eof
+
 
 
     type JsonParserNew(jsonText:string, cultureInfo : CultureInfo option, tolerateErrors : bool) = 
-
-        let hex2int c = 
-            match c with
-            | _ when c >= '0' && c <= '9'   -> (int c) - (int '0')     
-            | _ when c >= 'a' && c <= 'f'   -> (int c) - (int 'a') + 10
-            | _ when c >= 'A' && c <= 'F'   -> (int c) - (int 'A') + 10
-            | _                             -> 0
-        
-        let makeDouble (d : int) (i : int64) (n :int) (f : float) (e : float) = 
-            ((float d) * (pown 10. n) + (float i) + f)*e
-
-        let p_ws            : Parser<unit, unit>        = spaces
-        let p_token token   : Parser<unit, unit>        = skipChar token
-        let p_wstoken token : Parser<unit, unit>        = attempt (p_ws >>. p_token token)
-
-        let p_escape        : Parser<char, unit>      =  
-                anyOf """"\/bfnrt"""
-                |>> function
-                    | 'b' -> '\b'
-                    | 'f' -> '\f'
-                    | 'n' -> '\n'
-                    | 'r' -> '\r'
-                    | 't' -> '\t'
-                    | c   -> c
-        let p_unicodeEscape : Parser<char, unit>      =
-            p_token 'u' >>. pipe4 hex hex hex hex (fun h3 h2 h1 h0 -> 
-                (hex2int h3)*0x1000 + (hex2int h2)*0x100 + (hex2int h1)*0x10 + hex2int h0 |> char
-            )
-        let p_char          : Parser<char, unit>        =
-            choice
-                [
-                    noneOf """"\"""
-                    p_token '\\' >>. (p_escape <|> p_unicodeEscape)
-                ]
-        let p_stringLiteral : Parser<string, unit>      =
-            between (p_token '"') (p_token '"') (manyChars p_char)
-
-        let p_digit1To9     : Parser<char, unit>        = anyOf "123456789"
-        let p_digit         : Parser<int, unit>         = digit |>> hex2int
-        let p_int           : Parser<int64*int, unit>   = many p_digit |>> (fun digits ->
-                                let mutable result = 0L
-                                for d in digits do
-                                    result <- 10L * result + (int64 d)
-                                result,digits.Length
-                            )
-        let p_e             : Parser<float, unit>       = 
-            skipAnyOf "eE" >>. (choice [charReturn '-' 0.1;charReturn '+' 10.] <|> preturn 10.)
-        let p_exponent      : Parser<float, unit>       = 
-            p_e .>>. p_int |>> (fun (exp, (i,_)) -> pown exp (int i)) <|> preturn 1.
-        let p_fraction      : Parser<float, unit>       = 
-            (p_token '.' >>. (p_int |>> (fun (v,n) -> (float v) * (pown 0.1 n)))) <|> preturn 0.
-        let p_sign          : Parser<float, unit>       = 
-            (charReturn '-' -1.) <|> preturn 1.
-        let p_digit19       : Parser<int, unit>         = 
-            p_digit1To9 |>> hex2int
-        let p_numberLiteral : Parser<float, unit>       = 
-            p_sign .>>. choice 
-                            [
-                                // JSON doesn't allow numbers like 0123 (has to be 123).
-                                // This is probably to avoid issues with octals numbers
-                                pipe3 (p_token '0') p_fraction p_exponent (fun _ f e -> makeDouble 0 0L 0 f e)
-                                pipe4 p_digit19 p_int p_fraction p_exponent (fun d (v,n) f e -> makeDouble d v n f e)
-                            ] |>> (fun (s,n) -> s*n)
-
-
-        let p_null          : Parser<JsonValue, unit>    = stringReturn "null"   JsonValue.Null
-        let p_true          : Parser<JsonValue, unit>    = stringReturn "true"   <| JsonValue.Boolean true
-        let p_false         : Parser<JsonValue, unit>    = stringReturn "false"  <| JsonValue.Boolean false
-        let p_string        : Parser<JsonValue, unit>    = p_stringLiteral       |>> JsonValue.String
-        let p_number        : Parser<JsonValue, unit>    = p_numberLiteral       |>> JsonValue.Float
-
-        let rec p_value     : Parser<JsonValue, unit>    = fun cs -> 
-            cs 
-            |>  (p_ws 
-                    >>. choice
-                        [
-                            p_null 
-                            p_true
-                            p_false
-                            p_string
-                            p_number  
-                            p_object
-                            p_array  
-                        ])
-        and p_member        : Parser<string*JsonValue, unit> = 
-            p_ws >>. p_stringLiteral .>> p_ws .>> (p_token ':') .>>. p_value
-        and p_object        : Parser<JsonValue, unit>        = 
-            between (p_token '{') (p_wstoken '}') (sepBy p_member (p_wstoken ',') |>> (List.toArray >> JsonValue.Record))
-        and p_array         : Parser<JsonValue, unit>        = 
-            between (p_token '[') (p_wstoken ']') (sepBy p_value (p_wstoken ',') |>> (List.toArray >> JsonValue.Array))
-
-        let p_root          : Parser<JsonValue, unit>        = p_ws >>. choice [p_object;p_array]
-    
-        let p_json  = p_root .>> p_ws .>> eof
-        let p_jsons = (many p_root) .>> p_ws .>> eof
 
         member x.Parse () = 
             match run p_json jsonText with

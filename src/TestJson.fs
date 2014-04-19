@@ -99,10 +99,10 @@ let rec isEqual (l : JsonValue) (r : JsonValue) =
     | JsonValue.Null        , JsonValue.Null                                    -> true
     | JsonValue.Boolean lb  , JsonValue.Boolean rb when lb = rb                 -> true
     | JsonValue.String  ls  , JsonValue.String  rs when ls = rs                 -> true
-    | JsonValue.Float   lf  , JsonValue.Float   rf when isNear lf rf            -> true // The whole reason we do a custom isEqual
-    | JsonValue.Float   lf  , JsonValue.Number  rd when isNear lf (float rd)    -> true
-    | JsonValue.Number  ld  , JsonValue.Float   rf when isNear (float ld) rf    -> true
-    | JsonValue.Number  ld  , JsonValue.Number  rd when ld = rd                 -> true
+    | JsonValue.Float   lf  , JsonValue.Float   rf when isNear lf rf            -> true // The reasons we do a custom isEqual
+    | JsonValue.Float   lf  , JsonValue.Number  rd when isNear lf (float rd)    -> true // The reasons we do a custom isEqual
+    | JsonValue.Number  ld  , JsonValue.Float   rf when isNear (float ld) rf    -> true // The reasons we do a custom isEqual
+    | JsonValue.Number  ld  , JsonValue.Number  rd when ld = rd                 -> true // The reasons we do a custom isEqual
     | JsonValue.Array   lvs , JsonValue.Array   rvs -> 
         if lvs.Length <> rvs.Length then false
         else 
@@ -298,8 +298,8 @@ let runTestCases (parser : string->JsonValue) =
     let generatedTestCases = [ for i in 1..100 -> generateTestCase random ]
 
     let testCases = 
-        manualTestCases
-        generatedTestCases
+//        manualTestCases
+//        generatedTestCases
         manualTestCases@generatedTestCases
 
     let failures = ref 0
@@ -321,12 +321,39 @@ let runTestCases (parser : string->JsonValue) =
                 | None      -> ()
                 | Some exp  -> failure <| sprintf "Parse failed but expected to succeed\nJSON:\n%s\nExpected:\n%A\nException:\n%A" json exp e
 
+let testErrorMessage (parser : string->JsonValue) = 
 
+    let testCases =
+        [
+            """[NaN]"""                             
+            """0"""                                 
+            """true"""                              
+            """[,]"""                               
+            """[true,]"""                           
+            """{,}"""                               
+            """{a:[]}"""                            
+            """{"a":[],}"""                         
+            """[0123]"""                            
+        ]
 
+    let getErrorMessage json = 
+        try
+            ignore <| parser json
+            "FAILED: No parser error"
+        with 
+            e -> e.Message
+    
+    for testCase in testCases do
+        let msg = getErrorMessage testCase
+        printfn "%s" msg
+    
 [<EntryPoint>]
 let main argv = 
     printfn "Testing new Parser"
-    runTestCases <| fun json -> let p = FSharp.Data.Parser.JsonParserNew (json, None, false) in p.Parse ()
+//    runTestCases <| fun json -> let p = FSharp.Data.Parser.JsonParserNew (json, None, false) in p.Parse ()
+
+    testErrorMessage <| fun json -> let p = FSharp.Data.Parser.JsonParserNew (json, None, false) in p.Parse ()
+
 
 //    printfn "Testing old Parser"
 //    runTestCases <| fun json -> let p = FSharp.Data.Parser.JsonParserOld (json, None, false) in p.Parse ()
