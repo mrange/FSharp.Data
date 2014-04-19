@@ -295,12 +295,12 @@ let runTestCases (parser : string->JsonValue) =
 
     let random = Random (19740531)
 
-    let generatedTestCases = [ for i in 1..100 -> generateTestCase random ]
+    let generatedTestCases = [ for i in 1..1000 -> generateTestCase random ]
 
     let testCases = 
 //        manualTestCases
 //        generatedTestCases
-        manualTestCases@generatedTestCases
+         manualTestCases@generatedTestCases
 
     let failures = ref 0
 
@@ -351,7 +351,7 @@ let testErrorMessage (parser : string->JsonValue) =
 let main argv = 
     printfn "Testing new Parser"
     runTestCases <| fun json -> let p = FSharp.Data.Parser.JsonParserNew (json, None, false) in p.Parse ()
-//    testErrorMessage <| fun json -> let p = FSharp.Data.Parser.JsonParserNew (json, None, false) in p.Parse ()
+    testErrorMessage <| fun json -> let p = FSharp.Data.Parser.JsonParserNew (json, None, false) in p.Parse ()
 
 
 //    printfn "Testing old Parser"
