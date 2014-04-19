@@ -107,7 +107,8 @@ module Parser =
     open System
     open System.Diagnostics
     open System.Collections.Generic
-    
+    open OptimizedClosures
+
     // Generic parsers functions (similar look to FParsec)
 
     let initialCapacity = 16
@@ -127,16 +128,21 @@ module Parser =
 
         static member Empty = empty 
 
-    
-    [<Struct>]
-    type ParserState<'UserState>(input : string, position : int, userState : 'UserState) = 
+    type CharStream<'UserState>(input : string, userState : 'UserState) = 
         
-        member x.Input      = input
-        member x.Position   = position
-        member x.UserState  = userState
-        member x.IsEOF      = position >= input.Length || position < 0
+        let mutable position                = 0
+        let mutable generateErrorMessages   = false
 
-        member x.Match atLeast atMost (test : char->int->bool) : Substring*ParserState<'UserState> = 
+        member x.Input                  = input
+        member x.Position               = position
+        member x.UserState              = userState
+        member x.IsEOF                  = position >= input.Length || position < 0
+        member x.GenerateErrorMessages  = generateErrorMessages
+
+        member x.SetPosition pos                = position <- pos
+        member x.SetGenerateErrorMessages flag  = generateErrorMessages <- flag
+
+        member x.Match atLeast atMost (test : char->int->bool) : Substring = 
             Debug.Assert (atLeast >= 0)
             Debug.Assert (atMost >= atLeast)
 
@@ -147,7 +153,7 @@ module Parser =
             let remaining   = length - ``begin``
 
             if atLeast > remaining then
-                Substring.Empty,x
+                Substring.Empty
             else 
                 let required    = ``begin`` + atLeast
                 let ``end``     = ``begin`` + min remaining atMost
@@ -164,37 +170,67 @@ module Parser =
                 let stopped = if cont then pos else pos - 1
                 
                 if required > stopped then
-                    Substring.Empty,x
+                    Substring.Empty
                 else
-                    Substring(i,``begin``, stopped),ParserState(i,stopped, userState)
+                    position <- stopped
+                    Substring(i,``begin``, stopped)
 
-                    
-                    
     type ErrorMessage =
         | Expected      of string
         | NotExpected   of string
-        | Group         of ErrorMessage list
     
-    type ParserResult<'Result,'UserState> =
-         | Success of 'Result * ParserState<'UserState>
-         | Failure of ErrorMessage * ParserState<'UserState> 
 
-    type Parser<'Result, 'UserState> = ParserState<'UserState> -> ParserResult<'Result, 'UserState>
+    let noErrors : ErrorMessage list = []
 
-    let run (p : Parser<'T, unit>) (s : string) : ParserResult<'T, unit> = 
-        let ps = ParserState(s, 0, ())
-        p ps
+    type MergedErrors() =
+        let mutable pos     = -1
+        let mutable errors  = []
 
-    let prettify (ems : ErrorMessage) (ps : ParserState<'UserState>) =
+        member x.Merge (ps : CharStream<'Result>) (newErrors : ErrorMessage list) = 
+            let newPos = ps.Position
+            if not ps.GenerateErrorMessages then
+                ()
+            elif newPos <> pos then
+                pos <- newPos
+                errors <- newErrors
+            else
+                errors <- newErrors@errors
+        member x.Errors = errors
+        
+
+    let inline initialMerge (ps : CharStream<'Result>) (r : ErrorMessage list) : MergedErrors = 
+        let me = MergedErrors()
+        me.Merge ps r
+        me
+
+    let inline emptyMerge (ps : CharStream<'Result>) : MergedErrors = 
+        initialMerge ps []
+
+    [<Struct>]    
+    type Reply<'Result>(isOk : bool, result : 'Result, errorMessages : ErrorMessage list) =
+        
+        member x.Ok                 = isOk        
+        member x.Error              = not isOk        
+        member x.Result             = result
+        member x.ErrorMessages      = errorMessages
+
+    type Parser<'Result, 'UserState> = CharStream<'UserState> -> Reply<'Result>
+
+    type ParserResult<'Result, 'UserState> = 
+        | ParseSuccessful   of 'Result * int
+        | ParseFailed       of string * int
+
+    let prettify (ems : ErrorMessage list) (ps : CharStream<'UserState>) =
         let expected    = HashSet<string>()
         let notExpected = HashSet<string>()
         let rec collectMessages (ems : ErrorMessage) = 
             match ems with
             | Expected      m   ->  ignore <| expected.Add m
             | NotExpected   m   ->  ignore <| notExpected.Add m
-            | Group         emss->  for ems in emss do 
-                                        collectMessages ems
-        collectMessages ems
+
+        for em in ems do 
+            collectMessages em
+
         let input       =   System.String 
                                 (
                                     ps.Input 
@@ -226,10 +262,21 @@ module Parser =
             (input.[pos].ToString())
             reason 
 
-    let success (v : 'T) ps = Success (v, ps)
-    let failure ems      ps = Failure (ems, ps)
+    let run (p : Parser<'T, unit>) (s : string) : ParserResult<'T, unit> = 
+        let ps = CharStream(s, ())
+        let r = p ps
+        if r.Ok then ParseSuccessful (r.Result, ps.Position)
+        else
+            // Failed, now generate error message
+            ps.SetPosition 0
+            ps.SetGenerateErrorMessages true
+            let r = p ps 
+            ParseFailed (prettify r.ErrorMessages ps, ps.Position)
 
-    let preturn (v : 'T) : Parser<'T, 'UserState> = fun ps -> success v ps 
+    let inline success (v : 'T) ems    = Reply<'T> (true, v, ems)
+    let inline failure ems             = Reply<'T> (false, Unchecked.defaultof<'T>, ems)
+
+    let preturn (v : 'T) : Parser<'T, 'UserState> = fun ps -> success v [] 
 
     let debug (p : Parser<'T, 'UserState>) : Parser<'T, 'UserState> = 
         fun ps -> 
@@ -237,109 +284,123 @@ module Parser =
             r
 
     let eof : Parser<unit, 'UserState> = 
-        let ems = Expected "EOF"
+        let ems = [Expected "EOF"]
         fun ps ->
             match ps.IsEOF with
-            | false -> failure ems ps
-            | true  -> success () ps
+            | false -> failure ems 
+            | true  -> success () ems
 
     let spaces : Parser<unit, 'UserState> = 
         let test ch _ = Char.IsWhiteSpace ch
         fun ps ->
-            let ss,ps = ps.Match 0 Int32.MaxValue test
-            success () ps
+            let _ = ps.Match 0 Int32.MaxValue test
+            success () noErrors
 
     let skipChar (c : char): Parser<unit, 'UserState> = 
         let test ch _ = ch = c
-        let ems = Expected <| "'" + c.ToString() + "'"
+        let ems = [Expected <| "'" + c.ToString() + "'"]
         fun ps ->
-            let ss,ps = ps.Match 1 1 test
-            if not ss.IsEmpty then success () ps
-            else failure ems ps
+            let ss = ps.Match 1 1 test
+            if not ss.IsEmpty then success () ems
+            else failure ems
 
     let attempt (p : Parser<'T, 'UserState>) : Parser<'T, 'UserState> = 
         fun ps -> 
-            p ps
+            let pos = ps.Position
+            let r = p ps
+            if r.Error then ps.SetPosition pos
+            r
 
     let orElse (l : Parser<'T, 'UserState>) (r : Parser<'T, 'UserState>) : Parser<'T, 'UserState> = 
         fun ps ->
-            match l ps with
-            | Failure (_,ps)    -> r ps
-            | Success (lv, lps) -> Success (lv, lps)
+            let rl = l ps
+            let me = initialMerge ps rl.ErrorMessages
+            if rl.Ok then rl
+            else 
+                let rr = r ps
+                me.Merge ps rr.ErrorMessages
+                if rr.Ok then success rr.Result me.Errors
+                else failure me.Errors
     let ( <|> ) = orElse
 
     let map (p : Parser<'TFrom, 'UserState>) (m : 'TFrom->'TTo) : Parser<'TTo, 'UserState> = 
         fun ps ->
-            match p ps with
-            | Failure (ems,ps)  -> Failure (ems,ps)
-            | Success (v, ps)   -> Success (m v, ps)
+            let r = p ps
+            if r.Ok then success (m r.Result) r.ErrorMessages
+            else failure r.ErrorMessages
     let ( |>> ) = map
 
     let combine (l : Parser<'L, 'UserState>) (r : Parser<'R, 'UserState>) : Parser<'L*'R, 'UserState> = 
         fun ps ->
-            match l ps with
-            | Failure (lems,lps)  -> Failure (lems,lps)
-            | Success (lv, lps)  -> 
-                match r lps with
-                | Failure (rems,rps)    -> Failure (rems,rps)
-                | Success (rv, rps)     -> Success ((lv,rv), rps)
+            let rl = l ps
+            let me = initialMerge ps rl.ErrorMessages
+            if rl.Error then failure rl.ErrorMessages
+            else 
+                let rr = r ps
+                me.Merge ps rr.ErrorMessages
+                if rr.Error then failure me.Errors                
+                else success (rl.Result, rr.Result) me.Errors
     let ( .>>. ) = combine
 
     let keepLeft (l : Parser<'L, 'UserState>) (r : Parser<'R, 'UserState>) : Parser<'L, 'UserState> = 
         fun ps ->
-            match l ps with
-            | Failure (lems,lps)  -> Failure (lems,lps)
-            | Success (lv, lps)  -> 
-                match r lps with
-                | Failure (rems,rps)    -> Failure (rems,rps)
-                | Success (_, rps)     -> Success (lv, rps)
+            let rl = l ps
+            let me = initialMerge ps rl.ErrorMessages
+            if rl.Error then failure rl.ErrorMessages
+            else 
+                let rr = r ps
+                me.Merge ps rr.ErrorMessages
+                if rr.Error then failure me.Errors
+                else success rl.Result me.Errors
     let ( .>> ) = keepLeft
         
     let keepRight (l : Parser<'L, 'UserState>) (r : Parser<'R, 'UserState>) : Parser<'R, 'UserState> = 
         fun ps ->
-            match l ps with
-            | Failure (lems,lps)  -> Failure (lems,lps)
-            | Success (_, lps)  -> 
-                match r lps with
-                | Failure (rems,rps)    -> Failure (rems,rps)
-                | Success (rv, rps)     -> Success (rv, rps)
+            let rl = l ps
+            let me = initialMerge ps rl.ErrorMessages
+            if rl.Error then failure rl.ErrorMessages
+            else 
+                let rr = r ps
+                me.Merge ps rr.ErrorMessages
+                if rr.Error then failure me.Errors
+                else success rr.Result me.Errors
     let ( >>. ) = keepRight
 
-    let skipSatisfyImpl (test : char->int->bool) (ems : ErrorMessage) : Parser<unit, 'UserState> =
+    let skipSatisfyImpl (test : char->int->bool) (ems : ErrorMessage list) : Parser<unit, 'UserState> =
         fun ps ->
-            let ss,ps = ps.Match 1 1 test
-            if not ss.IsEmpty then success () ps
-            else failure ems ps
-        
-    let satisfyImpl (test : char->int->bool) (ems : ErrorMessage) : Parser<char, 'UserState> =
+            let ss = ps.Match 1 1 test
+            if not ss.IsEmpty then success () ems
+            else failure ems 
+                    
+    let satisfyImpl (test : char->int->bool) (ems : ErrorMessage list) : Parser<char, 'UserState> =
         fun ps ->
-            let ss,ps = ps.Match 1 1 test
-            if not ss.IsEmpty then success (ss.Char 0) ps
-            else failure ems ps
+            let ss = ps.Match 1 1 test
+            if not ss.IsEmpty then success (ss.Char 0) ems
+            else failure ems
 
     let skipAnyOf (s : string) : Parser<unit, 'UserState> = 
         let chars       = s.ToCharArray () 
         let set         = chars |> Set.ofArray
-        let ems         = chars |> Array.map (fun c -> Expected <| "'" + c.ToString() + "'") |> Seq.toList |> Group
+        let ems         = chars |> Array.map (fun c -> Expected <| "'" + c.ToString() + "'") |> Seq.toList
         let test ch _   = set.Contains ch
         skipSatisfyImpl test ems
 
     let anyOf (s : string) : Parser<char, 'UserState> = 
         let chars       = s.ToCharArray () 
         let set         = chars |> Set.ofArray
-        let ems         = chars |> Array.map (fun c -> Expected <| "'" + c.ToString() + "'") |> Seq.toList |> Group
+        let ems         = chars |> Array.map (fun c -> Expected <| "'" + c.ToString() + "'") |> Seq.toList
         let test ch _   = set.Contains ch
         satisfyImpl test ems
 
     let noneOf (s : string) : Parser<char, 'UserState> = 
         let chars       = s.ToCharArray () 
         let set         = chars |> Set.ofArray
-        let ems         = chars |> Array.map (fun c -> NotExpected <| "'" + c.ToString() + "'") |> Seq.toList |> Group
+        let ems         = chars |> Array.map (fun c -> NotExpected <| "'" + c.ToString() + "'") |> Seq.toList
         let test ch _   = not <| set.Contains ch
         satisfyImpl test ems
 
     let digit : Parser<char, 'UserState> =
-        let ems = Expected "Digit"
+        let ems = [Expected "Digit"]
         let test (ch : char) _ = 
             match ch with
             | _ when ch >= '0' && ch <= '9' -> true
@@ -347,7 +408,7 @@ module Parser =
         fun ps -> ps |> satisfyImpl test ems
 
     let hex : Parser<char, 'UserState> =
-        let ems = Expected "HexDigit"
+        let ems = [Expected "HexDigit"]
         let test (ch : char) _ = 
             match ch with
             | _ when ch >= '0' && ch <= '9' -> true
@@ -362,12 +423,16 @@ module Parser =
             (m  : 'T0->'T1->'T)
             : Parser<'T, 'UserState> = 
         fun ps ->
-            match p0 ps with
-            | Failure (ems0, ps0)   -> Failure (ems0, ps0)
-            | Success (v0, ps0)     ->
-                match p1 ps0 with
-                | Failure (ems1, ps1)   -> Failure (ems1, ps1)
-                | Success (v1, ps1)     -> success (m v0 v1) ps1
+            let r0 = p0 ps
+            let me = initialMerge ps r0.ErrorMessages
+            if r0.Error then failure me.Errors
+            else 
+                let r1 = p1 ps
+                me.Merge ps r1.ErrorMessages
+                if r1.Error then failure me.Errors
+                else
+                    success (m r0.Result r1.Result) me.Errors
+
     let pipe3 
             (p0 : Parser<'T0, 'UserState>) 
             (p1 : Parser<'T1, 'UserState>) 
@@ -375,15 +440,20 @@ module Parser =
             (m  : 'T0->'T1->'T2->'T)
             : Parser<'T, 'UserState> = 
         fun ps ->
-            match p0 ps with
-            | Failure (ems0, ps0)   -> Failure (ems0, ps0)
-            | Success (v0, ps0)     ->
-                match p1 ps0 with
-                | Failure (ems1, ps1)   -> Failure (ems1, ps1)
-                | Success (v1, ps1)     ->
-                    match p2 ps1 with
-                    | Failure (ems2, ps2)   -> Failure (ems2, ps2)
-                    | Success (v2, ps2)     -> success (m v0 v1 v2) ps2
+            let r0 = p0 ps
+            let me = initialMerge ps r0.ErrorMessages
+            if r0.Error then failure me.Errors
+            else 
+                let r1 = p1 ps
+                me.Merge ps r1.ErrorMessages
+                if r1.Error then failure me.Errors
+                else
+                    let r2 = p2 ps
+                    me.Merge ps r2.ErrorMessages
+                    if r2.Error then failure me.Errors
+                    else
+                        success (m r0.Result r1.Result r2.Result) me.Errors
+
     let pipe4 
             (p0 : Parser<'T0, 'UserState>) 
             (p1 : Parser<'T1, 'UserState>) 
@@ -392,34 +462,39 @@ module Parser =
             (m  : 'T0->'T1->'T2->'T3->'T)
             : Parser<'T, 'UserState> = 
         fun ps ->
-            match p0 ps with
-            | Failure (ems0, ps0)   -> Failure (ems0, ps0)
-            | Success (v0, ps0)     ->
-                match p1 ps0 with
-                | Failure (ems1, ps1)   -> Failure (ems1, ps1)
-                | Success (v1, ps1)     ->
-                    match p2 ps1 with
-                    | Failure (ems2, ps2)   -> Failure (ems2, ps2)
-                    | Success (v2, ps2)     ->
-                        match p3 ps2 with
-                        | Failure (ems3, ps3)   -> Failure (ems3, ps3)
-                        | Success (v3, ps3)     -> success (m v0 v1 v2 v3) ps3
+            let r0 = p0 ps
+            let me = initialMerge ps r0.ErrorMessages
+            if r0.Error then failure me.Errors
+            else 
+                let r1 = p1 ps
+                me.Merge ps r1.ErrorMessages
+                if r1.Error then failure me.Errors
+                else
+                    let r2 = p2 ps
+                    me.Merge ps r2.ErrorMessages
+                    if r2.Error then failure me.Errors
+                    else
+                        let r3 = p3 ps
+                        me.Merge ps r3.ErrorMessages
+                        if r3.Error then failure me.Errors
+                        else
+                            success (m r0.Result r1.Result r2.Result r3.Result) me.Errors
 
     let choice (parsers : Parser<'T, 'UserState> list) : Parser<'T, 'UserState> = 
         fun ps ->
-            let mutable finalEms    = []
+            let me = emptyMerge ps
             let mutable result      = None
             let mutable remaining   = parsers
             while result.IsNone && remaining.Length > 0 do
                 let p = remaining.Head
                 remaining <- remaining.Tail
-                match p ps with
-                | Failure (ems, _)  -> finalEms <- ems::finalEms
-                | Success (v, ps)   -> result <- Some (v,ps)
+                let r = p ps
+                me.Merge ps r.ErrorMessages
+                if r.Ok then result <- Some r.Result
 
             match result with 
-            | None          -> failure (Group finalEms) ps
-            | Some (v,ps)   -> success v ps
+            | None          -> failure me.Errors
+            | Some v        -> success v me.Errors
     
     let between 
             (b : Parser<_, 'UserState>) 
@@ -430,81 +505,83 @@ module Parser =
 
     let charReturn (c : char) (v : 'T) : Parser<'T, 'UserState> = 
         let test ch _   = c = ch
-        let ems         = Expected <| "'" + c.ToString() + "'"
+        let ems         = [Expected <| "'" + c.ToString() + "'"]
         fun ps ->
-            let ss,ps = ps.Match 1 1 test
-            if not ss.IsEmpty then success v ps
-            else failure ems ps
+            let ss = ps.Match 1 1 test
+            if not ss.IsEmpty then success v ems
+            else failure ems
 
     let stringReturn (s : string) (v : 'T) : Parser<'T, 'UserState> = 
         let test ch p   = s.[p] = ch
         let length      = s.Length
-        let ems         = Expected <| "'" + s + "'"
+        let ems         = [Expected <| "'" + s + "'"]
         fun ps ->
-            let ss,ps = ps.Match length length test
-            if not ss.IsEmpty then success v ps
-            else failure ems ps
+            let ss = ps.Match length length test
+            if not ss.IsEmpty then success v ems
+            else failure ems
 
     let many (p : Parser<'T, 'UserState>) : Parser<'T list, 'UserState> = 
         fun ps ->
-            let result          = List<'T>(initialCapacity)
-            let mutable cps     = ps
+            let me      = emptyMerge ps
+            let result  = List<'T>(initialCapacity)
             while 
-                match p cps with
-                | Failure _         -> false
-                | Success (v, vps)  ->
-                    result.Add v
-                    cps     <- vps
+                let r = p ps in // TODO: Why is this in required?
+                let _ = me.Merge ps r.ErrorMessages in
+                if r.Error then false
+                else 
+                    result.Add r.Result
                     true
                 do
                 ()
 
-            success (result |> Seq.toList) cps
+            success (result |> Seq.toList) me.Errors
 
     let manyChars (p : Parser<char, 'UserState>) : Parser<string, 'UserState> = 
         fun ps ->
-            let result          = StringBuilder()
-            let mutable cps     = ps
+            let me      = emptyMerge ps
+            let result  = StringBuilder()
             while 
-                match p cps with
-                | Failure _         -> false
-                | Success (v, vps)  ->
-                    ignore <| result.Append(v)
-                    cps     <- vps
+                let r = p ps in // TODO: Why is this in required?
+                let _ = me.Merge ps r.ErrorMessages in
+                if r.Error then false
+                else 
+                    ignore <| result.Append r.Result
                     true
                 do
                 ()
 
-            success (result.ToString()) cps
+            success (result.ToString()) me.Errors
 
     let sepBy (p : Parser<'T, 'UserState>) (sep : Parser<_, 'UserState>) : Parser<'T list, 'UserState> = 
         fun ps ->
-            let mutable rems    = None
-            let result          = List<'T>(initialCapacity)
-            let mutable cps     = ps
+            let result  = List<'T>(initialCapacity)
+            
+            let ri  = p ps 
+            let me  = initialMerge ps ri.ErrorMessages
 
-            match p cps with
-            | Failure _         -> ()
-            | Success (f, fps)  ->
-                result.Add f
-                cps     <- fps
+            if ri.Error then success [] me.Errors
+            else
+                let mutable failed = false
+                        
+                result.Add ri.Result
                 while 
-                    match sep cps with
-                    | Failure _         -> false
-                    | Success (_, sps)  ->
-                        match p sps with
-                        | Failure (ems,_)   -> 
-                            rems <- Some ems
+                    let rs = sep ps in  // TODO: Why is this in required?
+                    let _ = me.Merge ps rs.ErrorMessages in
+                    if rs.Error then false
+                    else
+                        let r = p ps
+                        me.Merge ps r.ErrorMessages
+                        if r.Error then 
+                            failed <- true
                             false
-                        | Success (v, vps)  ->
-                            result.Add v
-                            cps     <- vps
+                        else
+                            result.Add r.Result
                             true
                     do
                     ()
-            match rems with
-            | None      -> success (result |> Seq.toList) cps
-            | Some ems  -> failure ems ps
+                if failed then failure me.Errors
+                else
+                    success (result |> Seq.toList) me.Errors
 
     // JSON parsers specifics (should be FParsec compatible)
 
@@ -598,24 +675,22 @@ module Parser =
     and p_array         : Parser<JsonValue, unit>        = 
         between (p_token '[') (p_wstoken ']') (sepBy p_value (p_wstoken ',') |>> (List.toArray >> JsonValue.Array))
 
-    let p_root          : Parser<JsonValue, unit>        = p_ws >>. choice [p_object;p_array]
+    let p_root          : Parser<JsonValue, unit>        = p_ws >>. (debug <| choice [p_object;p_array])
     
     let p_json  = p_root .>> p_ws .>> eof
     let p_jsons = (many p_root) .>> p_ws .>> eof
-
-
 
     type JsonParserNew(jsonText:string, cultureInfo : CultureInfo option, tolerateErrors : bool) = 
 
         member x.Parse () = 
             match run p_json jsonText with
-            | Success (json, _)     -> json
-            | Failure (ems, ps)     -> failwith <| prettify ems ps 
+            | ParseSuccessful (json, pos) -> json
+            | ParseFailed (msg, pos)  -> failwith msg
 
         member x.ParseMultiple () = 
             match run p_jsons jsonText with
-            | Success (json, _)     -> json
-            | Failure (ems, ps)     -> failwith <| prettify ems ps 
+            | ParseSuccessful (json, pos) -> json
+            | ParseFailed (msg, pos)  -> failwith msg
 
     type JsonParserOld(jsonText:string, cultureInfo, tolerateErrors) =
 
