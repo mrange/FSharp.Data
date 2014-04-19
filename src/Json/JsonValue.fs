@@ -128,6 +128,8 @@ module Parser =
 
         static member Empty = empty 
 
+    type CharTest = FSharpFunc<char,int, bool>
+
     type CharStream<'UserState>(input : string, userState : 'UserState) = 
         
         let mutable position                = 0
@@ -136,13 +138,15 @@ module Parser =
         member x.Input                  = input
         member x.Position               = position
         member x.UserState              = userState
-        member x.IsEOF                  = position >= input.Length || position < 0
+        member x.IsEndOfStream          = position >= input.Length || position < 0
         member x.GenerateErrorMessages  = generateErrorMessages
+        member x.Peek ()                = if x.IsEndOfStream then '\uFFFF' else input.[position]
 
         member x.SetPosition pos                = position <- pos
         member x.SetGenerateErrorMessages flag  = generateErrorMessages <- flag
 
-        member x.Match atLeast atMost (test : char->int->bool) : Substring = 
+
+        member x.Match atLeast atMost (test : CharTest) : Substring = 
             Debug.Assert (atLeast >= 0)
             Debug.Assert (atMost >= atLeast)
 
@@ -163,7 +167,7 @@ module Parser =
                 let mutable pos  = ``begin``
 
                 while cont && pos < ``end`` do
-                    cont    <- test i.[pos] iter
+                    cont    <- test.Invoke(i.[pos], iter)
                     iter    <- iter + 1
                     pos     <- pos + 1
 
@@ -286,18 +290,18 @@ module Parser =
     let eof : Parser<unit, 'UserState> = 
         let ems = [Expected "EOF"]
         fun ps ->
-            match ps.IsEOF with
+            match ps.IsEndOfStream with
             | false -> failure ems 
             | true  -> success () ems
 
     let spaces : Parser<unit, 'UserState> = 
-        let test ch _ = Char.IsWhiteSpace ch
+        let test = CharTest.Adapt <| fun ch _ -> Char.IsWhiteSpace ch
         fun ps ->
             let _ = ps.Match 0 Int32.MaxValue test
             success () noErrors
 
     let skipChar (c : char): Parser<unit, 'UserState> = 
-        let test ch _ = ch = c
+        let test = CharTest.Adapt <| fun ch _ -> ch = c
         let ems = [Expected <| "'" + c.ToString() + "'"]
         fun ps ->
             let ss = ps.Match 1 1 test
@@ -366,13 +370,13 @@ module Parser =
                 else success rr.Result me.Errors
     let ( >>. ) = keepRight
 
-    let skipSatisfyImpl (test : char->int->bool) (ems : ErrorMessage list) : Parser<unit, 'UserState> =
+    let skipSatisfyImpl (test : CharTest) (ems : ErrorMessage list) : Parser<unit, 'UserState> =
         fun ps ->
             let ss = ps.Match 1 1 test
             if not ss.IsEmpty then success () ems
             else failure ems 
                     
-    let satisfyImpl (test : char->int->bool) (ems : ErrorMessage list) : Parser<char, 'UserState> =
+    let satisfyImpl (test : CharTest) (ems : ErrorMessage list) : Parser<char, 'UserState> =
         fun ps ->
             let ss = ps.Match 1 1 test
             if not ss.IsEmpty then success (ss.Char 0) ems
@@ -380,48 +384,49 @@ module Parser =
 
     let skipAnyOf (s : string) : Parser<unit, 'UserState> = 
         let chars       = s.ToCharArray () 
-        let set         = chars |> Set.ofArray
+        let set         = HashSet<char> (chars)
+        let test        = CharTest.Adapt <| fun ch _ -> set.Contains ch
         let ems         = chars |> Array.map (fun c -> Expected <| "'" + c.ToString() + "'") |> Seq.toList
-        let test ch _   = set.Contains ch
         skipSatisfyImpl test ems
 
     let anyOf (s : string) : Parser<char, 'UserState> = 
         let chars       = s.ToCharArray () 
-        let set         = chars |> Set.ofArray
+        let set         = HashSet<char> (chars)
+        let test        = CharTest.Adapt <| fun ch _ -> set.Contains ch
         let ems         = chars |> Array.map (fun c -> Expected <| "'" + c.ToString() + "'") |> Seq.toList
-        let test ch _   = set.Contains ch
         satisfyImpl test ems
 
     let noneOf (s : string) : Parser<char, 'UserState> = 
         let chars       = s.ToCharArray () 
-        let set         = chars |> Set.ofArray
+        let set         = HashSet<char> (chars)
+        let test        = CharTest.Adapt <| fun ch _ -> not <| set.Contains ch
         let ems         = chars |> Array.map (fun c -> NotExpected <| "'" + c.ToString() + "'") |> Seq.toList
-        let test ch _   = not <| set.Contains ch
         satisfyImpl test ems
 
     let digit : Parser<char, 'UserState> =
-        let ems = [Expected "Digit"]
-        let test (ch : char) _ = 
+        let test    = CharTest.Adapt <| fun ch _ -> 
             match ch with
             | _ when ch >= '0' && ch <= '9' -> true
             | _ -> false
-        fun ps -> ps |> satisfyImpl test ems
+        let ems     = [Expected "Digit"]
+        fun ps -> satisfyImpl test ems ps
 
     let hex : Parser<char, 'UserState> =
-        let ems = [Expected "HexDigit"]
-        let test (ch : char) _ = 
+        let test    = CharTest.Adapt <| fun ch _ -> 
             match ch with
             | _ when ch >= '0' && ch <= '9' -> true
             | _ when ch >= 'a' && ch <= 'f' -> true
             | _ when ch >= 'A' && ch <= 'F' -> true
             | _ -> false
-        fun ps -> ps |> satisfyImpl test ems
+        let ems = [Expected "HexDigit"]
+        fun ps -> satisfyImpl test ems ps
 
     let pipe2 
             (p0 : Parser<'T0, 'UserState>) 
             (p1 : Parser<'T1, 'UserState>) 
             (m  : 'T0->'T1->'T)
             : Parser<'T, 'UserState> = 
+        let fm = FSharpFunc<_,_,_>.Adapt m
         fun ps ->
             let r0 = p0 ps
             let me = initialMerge ps r0.ErrorMessages
@@ -431,7 +436,7 @@ module Parser =
                 me.Merge ps r1.ErrorMessages
                 if r1.Error then failure me.Errors
                 else
-                    success (m r0.Result r1.Result) me.Errors
+                    success (fm.Invoke(r0.Result, r1.Result)) me.Errors
 
     let pipe3 
             (p0 : Parser<'T0, 'UserState>) 
@@ -439,6 +444,7 @@ module Parser =
             (p2 : Parser<'T2, 'UserState>) 
             (m  : 'T0->'T1->'T2->'T)
             : Parser<'T, 'UserState> = 
+        let fm = FSharpFunc<_,_,_,_>.Adapt m
         fun ps ->
             let r0 = p0 ps
             let me = initialMerge ps r0.ErrorMessages
@@ -452,7 +458,7 @@ module Parser =
                     me.Merge ps r2.ErrorMessages
                     if r2.Error then failure me.Errors
                     else
-                        success (m r0.Result r1.Result r2.Result) me.Errors
+                        success (fm.Invoke(r0.Result, r1.Result, r2.Result)) me.Errors
 
     let pipe4 
             (p0 : Parser<'T0, 'UserState>) 
@@ -461,6 +467,7 @@ module Parser =
             (p3 : Parser<'T3, 'UserState>)
             (m  : 'T0->'T1->'T2->'T3->'T)
             : Parser<'T, 'UserState> = 
+        let fm = FSharpFunc<_,_,_,_,_>.Adapt m
         fun ps ->
             let r0 = p0 ps
             let me = initialMerge ps r0.ErrorMessages
@@ -478,7 +485,7 @@ module Parser =
                         me.Merge ps r3.ErrorMessages
                         if r3.Error then failure me.Errors
                         else
-                            success (m r0.Result r1.Result r2.Result r3.Result) me.Errors
+                            success (fm.Invoke(r0.Result, r1.Result, r2.Result, r3.Result)) me.Errors
 
     let choice (parsers : Parser<'T, 'UserState> list) : Parser<'T, 'UserState> = 
         fun ps ->
@@ -504,17 +511,17 @@ module Parser =
             pipe3 b p e <| fun _ v _ -> v
 
     let charReturn (c : char) (v : 'T) : Parser<'T, 'UserState> = 
-        let test ch _   = c = ch
-        let ems         = [Expected <| "'" + c.ToString() + "'"]
+        let ems     = [Expected <| "'" + c.ToString() + "'"]
+        let test    = CharTest.Adapt <| fun ch _ -> ch = c
         fun ps ->
             let ss = ps.Match 1 1 test
             if not ss.IsEmpty then success v ems
             else failure ems
 
     let stringReturn (s : string) (v : 'T) : Parser<'T, 'UserState> = 
-        let test ch p   = s.[p] = ch
         let length      = s.Length
         let ems         = [Expected <| "'" + s + "'"]
+        let test    = CharTest.Adapt <| fun ch p -> s.[p] = ch
         fun ps ->
             let ss = ps.Match length length test
             if not ss.IsEmpty then success v ems
