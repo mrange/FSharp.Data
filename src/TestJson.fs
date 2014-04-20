@@ -421,11 +421,11 @@ let main argv =
     let oldParseMultiple json = let p = FSharp.Data.Parser.JsonParserOld (json, None, false) in p.ParseMultiple ()
 
     printfn "Testing new Parser"
-//    runTestCases            newParse
-//    runSampleTestCases      newParseMultiple oldParseMultiple
+    runTestCases            newParse
+    runSampleTestCases      newParseMultiple oldParseMultiple
     runPerformanceTestCases newParseMultiple oldParseMultiple
-//    testErrorMessage        newParser
+    testErrorMessage        newParse
 
     printfn "Testing old Parser"
-//    runTestCases            oldParse
+    runTestCases            oldParse
     0
