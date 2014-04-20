@@ -348,7 +348,7 @@ module Parser =
     let spaces : Parser<unit, 'UserState> = 
         let test = CharTest.Adapt <| fun ch _ -> Char.IsWhiteSpace ch
         fun ps ->
-            let _ = ps.Match 0 Int32.MaxValue test
+            ignore <| ps.Match 0 Int32.MaxValue test
             success () noErrors
 
     let skipChar (c : char): Parser<unit, 'UserState> = 
@@ -711,21 +711,20 @@ module Parser =
     let p_number        : Parser<JsonValue, unit>    = p_numberLiteral       |>> JsonValue.Float
 
     let rec p_value     : Parser<JsonValue, unit>    = 
-        fun ps -> 
-            ps
-            |>  (
-                    p_ws 
-                    >>. choice
-                        [
-                            p_null 
-                            p_true
-                            p_false
-                            p_string
-                            p_number  
-                            p_object
-                            p_array  
-                        ]
-                )
+        let p = 
+            lazy
+                p_ws 
+                >>. choice
+                    [
+                        p_null 
+                        p_true
+                        p_false
+                        p_string
+                        p_number  
+                        p_object
+                        p_array  
+                    ]
+        fun ps -> p.Value ps
     and p_member        : Parser<string*JsonValue, unit> = 
         p_ws >>. p_stringLiteral .>> p_ws .>> (p_token ':') .>>. p_value
     and p_object        : Parser<JsonValue, unit>        = 
