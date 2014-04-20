@@ -159,40 +159,6 @@ module Parser =
 
         lambda.Compile ();
 
-    let fastMap (items : (string*'T) list) (defaultValue : 'T) : Func<char, int, 'T> = 
-        let tt = typeof<'T>
-        let parameter0     = Expression.Parameter   (typeof<char>   , "ch"      )
-        let parameter1     = Expression.Parameter   (typeof<int>    , "index"   )
-        let resultVariable = Expression.Variable    (tt             , "result"  )
-
-        let switchCases =
-            items 
-            |> List.map (fun (anyOf,v) -> 
-                Expression.SwitchCase    (
-                    Expression.Assign     (resultVariable, Expression.Constant(v, tt))                  ,
-                    anyOf |> Seq.map (fun ch -> Expression.Constant (ch) :> Expression) |> Seq.toArray) )
-            |> List.toArray
-
-        let switchStatement = 
-            Expression.Switch (
-                parameter0                                                                          ,
-                Expression.Assign        (resultVariable, Expression.Constant(defaultValue, tt))    ,
-                switchCases                                                                         )
-
-        let body = 
-            Expression.Block (
-                [|resultVariable|]  ,
-                switchStatement     ,
-                resultVariable      )
-
-        let lambda = 
-            Expression.Lambda<Func<char, int, 'T>>(
-               body         ,
-               parameter0   ,
-               parameter1   )
-
-        lambda.Compile ();
-
     // Generic parsers functions (similar look to FParsec)
 
     let initialCapacity = 16
@@ -674,27 +640,6 @@ module Parser =
 
     // JSON parsers specifics (should be FParsec compatible)
 
-    let fastChoice (parsers : (string*Parser<'T, 'UserState>) list) : Parser<'T, 'UserState> = 
-        let choices = parsers |> List.map (fun (anyOf,v) -> (anyOf, Some v))
-        let fm = fastMap choices None
-        let ems = 
-            parsers 
-            |> List.collect (fun (anyOf,_) -> anyOf |> Seq.toList)
-            |> List.map expectedChar
-        fun ps -> 
-            if ps.IsEndOfStream then failure ems
-            else 
-                let ch  = ps.Peek ()
-                let f   = fm.Invoke(ch, 0)
-                match f with
-                | None      -> failure ems
-                | Some p    -> 
-                    let me  = initialMerge ps ems
-                    let r   = p ps
-                    me.Merge ps r.ErrorMessages
-                    if r.Ok then success r.Result me.Errors
-                    else failure me.Errors
-
     let hex2int c = 
         match c with
         | _ when c >= '0' && c <= '9'   -> (int c) - (int '0')     
@@ -766,20 +711,21 @@ module Parser =
     let p_number        : Parser<JsonValue, unit>    = p_numberLiteral       |>> JsonValue.Float
 
     let rec p_value     : Parser<JsonValue, unit>    = 
-        let p = 
-            lazy
-                p_ws 
-                >>. fastChoice
-                    [
-                        "n"             , p_null 
-                        "t"             , p_true
-                        "f"             , p_false
-                        "\""            , p_string
-                        "-0123456789"   , p_number  
-                        "{"             , p_object
-                        "["             , p_array  
-                    ]
-        fun ps -> p.Value ps
+        fun ps -> 
+            ps
+            |>  (
+                    p_ws 
+                    >>. choice
+                        [
+                            p_null 
+                            p_true
+                            p_false
+                            p_string
+                            p_number  
+                            p_object
+                            p_array  
+                        ]
+                )
     and p_member        : Parser<string*JsonValue, unit> = 
         p_ws >>. p_stringLiteral .>> p_ws .>> (p_token ':') .>>. p_value
     and p_object        : Parser<JsonValue, unit>        = 
@@ -788,10 +734,10 @@ module Parser =
         between (p_token '[') (p_wstoken ']') (sepBy p_value (p_wstoken ',') |>> (List.toArray >> JsonValue.Array))
 
     let p_root          : Parser<JsonValue, unit>        = p_ws 
-                                                            >>. fastChoice 
+                                                            >>. choice
                                                                 [
-                                                                    "{"             , p_object
-                                                                    "["             , p_array  
+                                                                    p_object
+                                                                    p_array  
                                                                 ]
     
     let p_json  = p_root .>> p_ws .>> eof
