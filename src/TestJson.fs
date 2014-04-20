@@ -300,6 +300,7 @@ let runTestCases (parser : string->JsonValue) =
             """{a:[]}"""                            , None
             """{"a":[],}"""                         , None
             """[0123]"""                            , None
+            """[+123]"""                            , None
         ]
 
     let random = Random (19740531)
@@ -307,9 +308,9 @@ let runTestCases (parser : string->JsonValue) =
     let generatedTestCases = [ for i in 1..1000 -> generateTestCase random ]
 
     let testCases = 
-//        manualTestCases
+        manualTestCases
 //        generatedTestCases
-         manualTestCases@generatedTestCases
+//        manualTestCases@generatedTestCases
 
     for json,expected in testCases do
         try
