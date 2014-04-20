@@ -37,36 +37,6 @@
     <DocumentationFile>bin\Release\FSharp.Test.Json.XML</DocumentationFile>
     <Prefer32Bit>true</Prefer32Bit>
   </PropertyGroup>
-  <ItemGroup>
-    <Reference Include="mscorlib" />
-    <Reference Include="FSharp.Core, Version=$(TargetFSharpCoreVersion), Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
-      <Private>True</Private>
-    </Reference>
-    <Reference Include="System" />
-    <Reference Include="System.Core" />
-    <Reference Include="System.Numerics" />
-  </ItemGroup>
-  <ItemGroup>
-    <Compile Include="Net\UriUtils.fs">
-      <Link>UriUtils.fs</Link>
-    </Compile>
-    <Compile Include="Net\Http.fs">
-      <Link>Http.fs</Link>
-    </Compile>
-    <Compile Include="CommonRuntime\IO.fs">
-      <Link>IO.fs</Link>
-    </Compile>
-    <Compile Include="CommonRuntime\HttpUtils.fs">
-      <Link>HttpUtils.fs</Link>
-    </Compile>
-    <Compile Include="CommonRuntime\TextConversions.fs">
-      <Link>TextConversions.fs</Link>
-    </Compile>
-    <Compile Include="Json\JsonValue.fs">
-      <Link>JsonValue.fs</Link>
-    </Compile>
-    <Compile Include="TestJson.fs" />
-  </ItemGroup>
   <PropertyGroup>
     <MinimumVisualStudioVersion Condition="'$(MinimumVisualStudioVersion)' == ''">11</MinimumVisualStudioVersion>
   </PropertyGroup>
@@ -83,6 +53,95 @@
     </Otherwise>
   </Choose>
   <Import Project="$(FSharpTargetsPath)" />
+  <ItemGroup>
+    <Compile Include="Net\UriUtils.fs">
+      <Link>FSharp.Data\UriUtils.fs</Link>
+    </Compile>
+    <Compile Include="Net\Http.fs">
+      <Link>FSharp.Data\Http.fs</Link>
+    </Compile>
+    <Compile Include="CommonRuntime\IO.fs">
+      <Link>FSharp.Data\IO.fs</Link>
+    </Compile>
+    <Compile Include="CommonRuntime\HttpUtils.fs">
+      <Link>FSharp.Data\HttpUtils.fs</Link>
+    </Compile>
+    <Compile Include="CommonRuntime\TextConversions.fs">
+      <Link>FSharp.Data\TextConversions.fs</Link>
+    </Compile>
+    <Compile Include="Json\JsonValue.fs">
+      <Link>FSharp.Data\JsonValue.fs</Link>
+    </Compile>
+    <Content Include="..\tests\FSharp.Data.Tests\Data\contacts.json">
+      <Link>TestData\contacts.json</Link>
+    </Content>
+    <Content Include="..\tests\FSharp.Data.Tests\Data\Dates.json">
+      <Link>TestData\Dates.json</Link>
+    </Content>
+    <Content Include="..\tests\FSharp.Data.Tests\Data\DoubleNested.json">
+      <Link>TestData\DoubleNested.json</Link>
+    </Content>
+    <Content Include="..\tests\FSharp.Data.Tests\Data\Empty.json">
+      <Link>TestData\Empty.json</Link>
+    </Content>
+    <Content Include="..\tests\FSharp.Data.Tests\Data\GitHub.json">
+      <Link>TestData\GitHub.json</Link>
+    </Content>
+    <Content Include="..\tests\FSharp.Data.Tests\Data\Nested.json">
+      <Link>TestData\Nested.json</Link>
+    </Content>
+    <Content Include="..\tests\FSharp.Data.Tests\Data\optionals.json">
+      <Link>TestData\optionals.json</Link>
+    </Content>
+    <Content Include="..\tests\FSharp.Data.Tests\Data\OptionValues.json">
+      <Link>TestData\OptionValues.json</Link>
+    </Content>
+    <Content Include="..\tests\FSharp.Data.Tests\Data\projects.json">
+      <Link>TestData\projects.json</Link>
+    </Content>
+    <Content Include="..\tests\FSharp.Data.Tests\Data\Simple.json">
+      <Link>TestData\Simple.json</Link>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\tests\FSharp.Data.Tests\Data\SimpleArray.json">
+      <Link>TestData\SimpleArray.json</Link>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\tests\FSharp.Data.Tests\Data\topics.json">
+      <Link>TestData\topics.json</Link>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\tests\FSharp.Data.Tests\Data\TwitterSample.json">
+      <Link>TestData\TwitterSample.json</Link>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\tests\FSharp.Data.Tests\Data\TwitterStream.json">
+      <Link>TestData\TwitterStream.json</Link>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\tests\FSharp.Data.Tests\Data\WikiData.json">
+      <Link>TestData\WikiData.json</Link>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\tests\FSharp.Data.Tests\Data\Vindinium.json">
+      <Link>TestData\Vindinium.json</Link>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\tests\FSharp.Data.Tests\Data\WorldBank.json">
+      <Link>TestData\WorldBank.json</Link>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Compile Include="TestJson.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="mscorlib" />
+    <Reference Include="FSharp.Core, Version=$(TargetFSharpCoreVersion), Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Numerics" />
+  </ItemGroup>
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.
   <Target Name="BeforeBuild">

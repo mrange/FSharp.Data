@@ -8,10 +8,18 @@
 // --------------------------------------------------------------------------------------
 
 open System
+open System.Diagnostics
 open System.Globalization
+open System.IO
 open System.Text
 open FSharp.Data
 open FSharp.Data.Runtime.HttpUtils
+
+let failures = ref 0
+
+let failure (m : string) = 
+    failures := !failures + 1
+    printfn "FAILURE: %s" m
 
 let FdArray     = JsonValue.Array
 let FdNull      = JsonValue.Null
@@ -19,7 +27,6 @@ let FdBoolean   = JsonValue.Boolean
 let FdString    = JsonValue.String
 let FdNumber    = JsonValue.Float
 let FdObject    = JsonValue.Record
-
 
 type Whitespace = string*string
 
@@ -227,6 +234,8 @@ let generateTestCase (r : Random) : string*(JsonValue option) =
     json,e
 
 let runTestCases (parser : string->JsonValue) = 
+    printfn "Running manual and generated test cases"
+
     let manualTestCases = 
         [
             // Positive tests
@@ -302,12 +311,6 @@ let runTestCases (parser : string->JsonValue) =
 //        generatedTestCases
          manualTestCases@generatedTestCases
 
-    let failures = ref 0
-
-    let failure (m : string) = 
-        failures := !failures + 1
-        printfn "FAILURE: %s" m
-
     for json,expected in testCases do
         try
             let result = parser json
@@ -321,8 +324,70 @@ let runTestCases (parser : string->JsonValue) =
                 | None      -> ()
                 | Some exp  -> failure <| sprintf "Parse failed but expected to succeed\nJSON:\n%s\nExpected:\n%A\nException:\n%A" json exp e
 
-let testErrorMessage (parser : string->JsonValue) = 
+let runSampleTestCases (newParser : string->seq<JsonValue>) (oldParser : string->seq<JsonValue>) =
+    printfn "Running sample test cases"
 
+    let samplePath      = Path.Combine (AppDomain.CurrentDomain.BaseDirectory, "TestData")
+    let documentPaths   = Directory.GetFiles(samplePath, "*.json")
+
+    for documentPath in documentPaths do
+        try
+            let document = File.ReadAllText documentPath
+            let newJson = newParser document
+            let oldJson = oldParser document
+
+            let compared = 
+                oldJson 
+                |> Seq.mapi (fun i l -> i,l) 
+                |> Seq.compareWith (
+                    fun (li,l) (ri,r) -> 
+                        if isEqual l r then 0 else 1000 * (ri + 1) + (li + 1)
+                    ) (newJson |> Seq.mapi (fun i l -> i,l))
+
+            if compared <> 0 then
+                failure <| sprintf "Parsed successful for document but new and old parser differs, result: %d: %s" compared documentPath
+            else
+                ()
+        with
+            e -> 
+                failure <| sprintf "Parsed failed for document: %s, message: %s" documentPath e.Message
+
+let runPerformanceTestCases (newParser : string->seq<JsonValue>) (oldParser : string->seq<JsonValue>) =
+    printfn "Running performance test cases"
+
+    let samplePath      = Path.Combine (AppDomain.CurrentDomain.BaseDirectory, "TestData")
+    let documentPath    = Path.Combine (samplePath, "topics.json")
+
+    try
+        let document = File.ReadAllText documentPath
+
+        // Dry run
+        ignore <| newParser document
+        ignore <| oldParser document
+
+        let iterations  = 100
+
+        printfn "Running %d iterations on document: %s using old parser" iterations documentPath
+        let oldStopWatch   = Stopwatch()
+        oldStopWatch.Start()
+        for i in 1..iterations do
+            ignore (oldParser document |> Seq.toList)
+        oldStopWatch.Stop()
+
+        printfn "Running %d iterations on document: %s using new parser" iterations documentPath
+        let newStopWatch   = Stopwatch()
+        newStopWatch.Start()
+        for i in 1..iterations do
+            ignore (newParser document |> Seq.toList)
+        newStopWatch.Stop()
+
+        printfn "Result: Old parser: %d ms, new parser: %d ms" oldStopWatch.ElapsedMilliseconds newStopWatch.ElapsedMilliseconds
+
+    with
+        e -> 
+            failure <| sprintf "Parsed failed for document: %s, message: %s" documentPath e.Message
+
+let testErrorMessage (parser : string->JsonValue) = 
     let testCases =
         [
             """[NaN]"""                             
@@ -346,14 +411,21 @@ let testErrorMessage (parser : string->JsonValue) =
     for testCase in testCases do
         let msg = getErrorMessage testCase
         printfn "%s" msg
-    
+
+
 [<EntryPoint>]
 let main argv = 
+    let newParse         json = let p = FSharp.Data.Parser.JsonParserNew (json, None, false) in p.Parse ()
+    let oldParse         json = let p = FSharp.Data.Parser.JsonParserOld (json, None, false) in p.Parse ()
+    let newParseMultiple json = let p = FSharp.Data.Parser.JsonParserNew (json, None, false) in p.ParseMultiple ()
+    let oldParseMultiple json = let p = FSharp.Data.Parser.JsonParserOld (json, None, false) in p.ParseMultiple ()
+
     printfn "Testing new Parser"
-    runTestCases <| fun json -> let p = FSharp.Data.Parser.JsonParserNew (json, None, false) in p.Parse ()
-    testErrorMessage <| fun json -> let p = FSharp.Data.Parser.JsonParserNew (json, None, false) in p.Parse ()
+//    runTestCases            newParse
+//    runSampleTestCases      newParseMultiple oldParseMultiple
+    runPerformanceTestCases newParseMultiple oldParseMultiple
+//    testErrorMessage        newParser
 
-
-//    printfn "Testing old Parser"
-//    runTestCases <| fun json -> let p = FSharp.Data.Parser.JsonParserOld (json, None, false) in p.Parse ()
+    printfn "Testing old Parser"
+//    runTestCases            oldParse
     0

@@ -805,7 +805,7 @@ module Parser =
 
         member x.ParseMultiple () = 
             match run p_jsons jsonText with
-            | ParseSuccessful (json, pos) -> json
+            | ParseSuccessful (json, pos) -> json :> seq<JsonValue>
             | ParseFailed (msg, pos)  -> failwith msg
 
     type JsonParserOld(jsonText:string, cultureInfo, tolerateErrors) =
