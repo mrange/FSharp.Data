@@ -269,27 +269,27 @@ let runTestCases (parser : string->JsonValue) =
             """{"\"":null}"""                       , Some <| FdObject [|"\"",FdNull|]
             """{"\"\\\//\b\f\n\r\t\u0041":null}"""  , Some <| FdObject [|"\"\\//\b\f\n\r\t\u0041",FdNull|]
             // Whitespace cases
-            """ []"""                               , Some <| FdArray [||]
-            """[] """                               , Some <| FdArray [||]
-            """ [] """                              , Some <| FdArray [||]
-            """[ true]"""                           , Some <| FdArray [|FdBoolean true|]
-            """[true ]"""                           , Some <| FdArray [|FdBoolean true|]
-            """[ true ]"""                          , Some <| FdArray [|FdBoolean true|]
-            """[null, true]"""                      , Some <| FdArray [|FdNull;FdBoolean true|]
-            """[null ,true]"""                      , Some <| FdArray [|FdNull;FdBoolean true|]
-            """[null , true]"""                     , Some <| FdArray [|FdNull;FdBoolean true|]
-            """ {}"""                               , Some <| FdObject [||]
-            """{} """                               , Some <| FdObject [||]
-            """ {} """                              , Some <| FdObject [||]
-            """{ "a":true}"""                       , Some <| FdObject [|"a",FdBoolean true|]
-            """{"a":true }"""                       , Some <| FdObject [|"a",FdBoolean true|]
-            """{ "a":true }"""                      , Some <| FdObject [|"a",FdBoolean true|]
-            """{"a" :true}"""                       , Some <| FdObject [|"a",FdBoolean true|]
-            """{"a": true}"""                       , Some <| FdObject [|"a",FdBoolean true|]
-            """{"a" : true}"""                      , Some <| FdObject [|"a",FdBoolean true|]
-            """{"a":[] ,"b":{}}"""                  , Some <| FdObject [|"a",FdArray [||];"b",FdObject [||]|]
-            """{"a":[], "b":{}}"""                  , Some <| FdObject [|"a",FdArray [||];"b",FdObject [||]|]
-            """{"a":[] , "b":{}}"""                 , Some <| FdObject [|"a",FdArray [||];"b",FdObject [||]|]
+            """  []"""                              , Some <| FdArray [||]
+            """[]  """                              , Some <| FdArray [||]
+            """  []  """                            , Some <| FdArray [||]
+            """[  true]"""                          , Some <| FdArray [|FdBoolean true|]
+            """[true  ]"""                          , Some <| FdArray [|FdBoolean true|]
+            """[  true  ]"""                        , Some <| FdArray [|FdBoolean true|]
+            """[null,  true]"""                     , Some <| FdArray [|FdNull;FdBoolean true|]
+            """[null  ,true]"""                     , Some <| FdArray [|FdNull;FdBoolean true|]
+            """[null  ,  true]"""                   , Some <| FdArray [|FdNull;FdBoolean true|]
+            """  {}"""                              , Some <| FdObject [||]
+            """{}  """                              , Some <| FdObject [||]
+            """  {}  """                            , Some <| FdObject [||]
+            """{  "a":true}"""                      , Some <| FdObject [|"a",FdBoolean true|]
+            """{"a":true  }"""                      , Some <| FdObject [|"a",FdBoolean true|]
+            """{  "a":true  }"""                    , Some <| FdObject [|"a",FdBoolean true|]
+            """{"a"  :true}"""                      , Some <| FdObject [|"a",FdBoolean true|]
+            """{"a":  true}"""                      , Some <| FdObject [|"a",FdBoolean true|]
+            """{"a"  :  true}"""                    , Some <| FdObject [|"a",FdBoolean true|]
+            """{"a":[]  ,"b":{}}"""                 , Some <| FdObject [|"a",FdArray [||];"b",FdObject [||]|]
+            """{"a":[],  "b":{}}"""                 , Some <| FdObject [|"a",FdArray [||];"b",FdObject [||]|]
+            """{"a":[]  ,  "b":{}}"""               , Some <| FdObject [|"a",FdArray [||];"b",FdObject [||]|]
             // Negative tests
             """0"""                                 , None
             """true"""                              , None
@@ -297,6 +297,7 @@ let runTestCases (parser : string->JsonValue) =
             """[,]"""                               , None
             """[true,]"""                           , None
             """{,}"""                               , None
+            """{{}}"""                              , None
             """{a:[]}"""                            , None
             """{"a":[],}"""                         , None
             """[0123]"""                            , None
@@ -403,9 +404,11 @@ let testErrorMessage (parser : string->JsonValue) =
             """[,]"""                               
             """[true,]"""                           
             """{,}"""                               
+            """{{}}"""                               
             """{a:[]}"""                            
             """{"a":[],}"""                         
             """[0123]"""                            
+            """[+0123]"""                            
         ]
 
     let getErrorMessage json = 

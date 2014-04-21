@@ -284,7 +284,14 @@ module Parser =
 
     let noErrors : ErrorMessage list = []
 
-    let expectedChar    (ch : char) = Expected      <| "'" + ch.ToString() + "'"
+    let expectedChar    (ch     : char)     = 
+        Expected  <| "'" + ch.ToString() + "'"
+    let expectedString  (s      : string)   = 
+        Expected  <| "'" + s.ToString() + "'"
+    let expectedAnyOf   (anyOf  : string)   = 
+        Expected  <| if anyOf.Length = 1 then "'" + anyOf + "'" else "any char in '" + anyOf + "'"
+    let notExpectedAnyOf   (anyOf  : string)   = 
+        NotExpected  <| if anyOf.Length = 1 then "'" + anyOf + "'" else "any char in '" + anyOf + "'"
 
     type MergedErrors() =
         let mutable pos     = -1
@@ -478,19 +485,19 @@ module Parser =
 
     let skipAnyOf (s : string) : Parser<unit, 'UserState> =
         let test        = FSharpFuncWrap<char,int,bool>(fastAnyOf s true)
-        let ems         = [Expected <| "any char in '" + s + "'"]
+        let ems         = [expectedAnyOf s]
         skipSatisfyImpl test ems
 
     let anyOf (s : string) : Parser<char, 'UserState> =
         let fastSet     = fastAnyOf s true
         let test        = CharTest.Adapt <| fun ch p -> fastSet.Invoke(ch,p)
-        let ems         = [Expected <| "any char in '" + s + "'"]
+        let ems         = [expectedAnyOf s]
         satisfyImpl test ems
 
     let noneOf (s : string) : Parser<char, 'UserState> =
         let fastSet     = fastAnyOf s false
         let test        = CharTest.Adapt <| fun ch p -> fastSet.Invoke(ch,p)
-        let ems         = [Expected <| "any char in '" + s + "'"]
+        let ems         = [notExpectedAnyOf s]
         satisfyImpl test ems
 
     let digit : Parser<char, 'UserState> =
@@ -611,7 +618,7 @@ module Parser =
 
     let stringReturn (s : string) (v : 'T) : Parser<'T, 'UserState> =
         let length  = s.Length
-        let ems     = [Expected <| "'" + s + "'"]
+        let ems     = [expectedString s]
         let test    = CharTest.Adapt <| fun ch p -> s.[p] = ch
         fun ps ->
             let ss = ps.Match length length test
@@ -686,8 +693,8 @@ module Parser =
         let r = ref dummyParser
         (fun stream -> !r stream), r : Parser<_,'u> * Parser<_,'u> ref
 
-    let fastChoice (parsers : (string*Parser<'T, 'UserState>) list) : Parser<'T, 'UserState> =
-        let choices = parsers |> List.map (fun (anyOf,v) -> (anyOf, Some v))
+    let fastChoice (parsers : (string*string option*Parser<'T, 'UserState>) list) : Parser<'T, 'UserState> =
+        let choices = parsers |> List.map (fun (anyOf,_,v) -> (anyOf, Some v))
         let fm = fastMap choices None
         let buildString (ss : string list) = 
             let sb = StringBuilder()
@@ -696,11 +703,10 @@ module Parser =
             sb.ToString ()
         let ems =
             parsers
-            |> List.collect (fun (anyOf,_) -> anyOf |> Seq.toList)
+            |> List.map (fun (anyOf,l,_) -> match l with | Some label -> expectedString label | _ -> expectedAnyOf anyOf)
             |> Seq.distinct
             |> Seq.sort
-            |> Seq.toArray
-            |> fun cs -> [Expected <| "any char in '" + System.String(cs) + "'"]
+            |> Seq.toList
         fun ps ->
             if ps.IsEndOfStream then failure ems
             else
@@ -799,23 +805,23 @@ module Parser =
             lazy
                 fastChoice
                     [
-                        "n"             , p_null
-                        "t"             , p_true
-                        "f"             , p_false
-                        "\""            , p_string
-                        "-0123456789"   , p_number
-                        "{"             , p_object
-                        "["             , p_array
+                        "n"             , Some "null"   , p_null
+                        "t"             , Some "true"   , p_true
+                        "f"             , Some "false"  , p_false
+                        "\""            , None          , p_string
+                        "-0123456789"   , None          , p_number
+                        "{"             , None          , p_object
+                        "["             , None          , p_array
                     ]
                 .>> p_ws
         fun ps -> p.Value ps
 
 
     let p_root          : Parser<JsonValue, unit>        = 
-        choice
+        fastChoice
             [
-                p_object
-                p_array
+                "{"             , None          , p_object
+                "["             , None          , p_array
             ]
         .>> p_ws
 
