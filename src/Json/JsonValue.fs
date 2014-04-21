@@ -105,31 +105,19 @@ module JsonValue =
 
 module Parser =
 
-    open System
-    open System.Diagnostics
-    open System.Collections.Generic
     open OptimizedClosures
+    open System
+    open System.Collections.Generic
+    open System.Diagnostics
+    open System.Linq.Expressions
+    open System.Text           
+
+    type FSharpFuncWrap<'T1, 'T2, 'U>(func : Func<'T1, 'T2, 'U>) =
+        inherit FSharpFunc<'T1, 'T2, 'U>()
+        override x.Invoke(i1,i2) = func.Invoke(i1,i2)
+        override x.Invoke(i1 : 'T1) : ('T2 -> 'U) = fun i2 -> func.Invoke(i1, i2)
 
     let fastAnyOf (anyOf : string) (matchResult : bool) : Func<char, int, bool> =
-        // For input string "Test" this generates the equivalent code to
-        // Func<char, int> d = (ch, index) =>
-        // {
-        //    bool result;
-        //    switch (ch)
-        //    {
-        //       case 'T':
-        //       case 'e':
-        //       case 's':
-        //       case 't':
-        //          result = matchResult;
-        //          break;
-        //       default:
-        //          result = !matchResult;
-        //          break;
-        //    }
-        //    return result;
-        // }
-
         let parameter0     = Expression.Parameter   (typeof<char>   , "ch"      )
         let parameter1     = Expression.Parameter   (typeof<int>    , "index"   )
         let resultVariable = Expression.Variable    (typeof<bool>   , "result"  )
@@ -159,14 +147,46 @@ module Parser =
 
         lambda.Compile ();
 
+    let fastMap (items : (string*'T) list) (defaultValue : 'T) : Func<char, int, 'T> =
+        let tt = typeof<'T>
+        let parameter0     = Expression.Parameter   (typeof<char>   , "ch"      )
+        let parameter1     = Expression.Parameter   (typeof<int>    , "index"   )
+        let resultVariable = Expression.Variable    (tt             , "result"  )
+
+        let switchCases =
+            items
+            |> List.map (fun (anyOf,v) ->
+                Expression.SwitchCase    (
+                    Expression.Assign     (resultVariable, Expression.Constant(v, tt))                  ,
+                    anyOf |> Seq.map (fun ch -> Expression.Constant (ch) :> Expression) |> Seq.toArray) )
+            |> List.toArray
+
+        let switchStatement =
+            Expression.Switch (
+                parameter0                                                                          ,
+                Expression.Assign        (resultVariable, Expression.Constant(defaultValue, tt))    ,
+                switchCases                                                                         )
+
+        let body =
+            Expression.Block (
+                [|resultVariable|]  ,
+                switchStatement     ,
+                resultVariable      )
+
+        let lambda =
+            Expression.Lambda<Func<char, int, 'T>>(
+                body         ,
+                parameter0   ,
+                parameter1   )
+
+        lambda.Compile ();
+
     // Generic parsers functions (similar look to FParsec)
 
     let initialCapacity = 16
 
     [<Struct>]
     type Substring(i : string, b : int, e : int) =
-        static let empty = Substring("",0,0)
-
         member x.Input      = i
         member x.Begin      = b
         member x.End        = e
@@ -176,24 +196,25 @@ module Parser =
         member x.Str        = i.Substring(b, e - b)
         member x.Char idx   = i.[b + idx]
 
-        static member Empty = empty
+    let emptySubstring  = Substring("",0,0)
+    let eosChar         = '\uFFFF'
 
     type CharTest = FSharpFunc<char,int, bool>
 
     type CharStream<'UserState>(input : string, userState : 'UserState) =
 
-        let mutable position                = 0
-        let mutable generateErrorMessages   = false
+        let mutable position            = 0
+        let mutable noErrorMessages     = true
 
         member x.Input                  = input
         member x.Position               = position
         member x.UserState              = userState
         member x.IsEndOfStream          = position >= input.Length || position < 0
-        member x.GenerateErrorMessages  = generateErrorMessages
+        member x.NoErrorMessages        = noErrorMessages
         member x.Peek ()                = if x.IsEndOfStream then '\uFFFF' else input.[position]
 
-        member x.SetPosition pos                = position <- pos
-        member x.SetGenerateErrorMessages flag  = generateErrorMessages <- flag
+        member x.SetPosition pos        = position <- pos
+        member x.SetNoErrorMessages flag= noErrorMessages <- flag
 
         member x.Match atLeast atMost (test : CharTest) : Substring =
             Debug.Assert (atLeast >= 0)
@@ -206,7 +227,7 @@ module Parser =
             let remaining   = length - ``begin``
 
             if atLeast > remaining then
-                Substring.Empty
+                emptySubstring
             else
                 let required    = ``begin`` + atLeast
                 let ``end``     = ``begin`` + min remaining atMost
@@ -223,10 +244,39 @@ module Parser =
                 let stopped = if cont then pos else pos - 1
 
                 if required > stopped then
-                    Substring.Empty
+                    emptySubstring
                 else
                     position <- stopped
                     Substring(i,``begin``, stopped)
+
+        member x.MatchChar (test : CharTest) : char =
+            let i           = input
+            let pos         = position
+            let length      = i.Length
+
+            if pos < length && test.Invoke(i.[pos], 0) then
+                position <- pos + 1
+                i.[pos]
+            else
+                eosChar
+
+        member x.SkipWhitespaces () : unit =
+            let i           = input
+            let length      = i.Length
+
+            let mutable pos  = position
+
+            while   pos < length &&
+                    match i.[pos] with
+                    | ' '
+                    | '\t'
+                    | '\n'
+                    | '\r'  -> true
+                    | _     -> false
+                do
+                pos <- pos + 1
+
+            position <- pos
 
     type ErrorMessage =
         | Expected      of string
@@ -235,21 +285,21 @@ module Parser =
     let noErrors : ErrorMessage list = []
 
     let expectedChar    (ch : char) = Expected      <| "'" + ch.ToString() + "'"
-    let notExpectedChar (ch : char) = NotExpected   <| "'" + ch.ToString() + "'"
 
     type MergedErrors() =
         let mutable pos     = -1
         let mutable errors  = []
 
         member x.Merge (ps : CharStream<'Result>) (newErrors : ErrorMessage list) =
-            let newPos = ps.Position
-            if not ps.GenerateErrorMessages then
+            if ps.NoErrorMessages then
                 ()
-            elif newPos <> pos then
-                pos <- newPos
-                errors <- newErrors
             else
-                errors <- newErrors@errors
+                let newPos = ps.Position
+                if newPos <> pos then
+                    pos <- newPos
+                    errors <- newErrors
+                else
+                    errors <- newErrors@errors
         member x.Errors = errors
 
 
@@ -272,8 +322,8 @@ module Parser =
     type Parser<'Result, 'UserState> = CharStream<'UserState> -> Reply<'Result>
 
     type ParserResult<'Result, 'UserState> =
-        | ParseSuccessful   of 'Result * int
-        | ParseFailed       of string * int
+        | Success           of 'Result * 'UserState * int
+        | Failure           of string * int * 'UserState
 
     let prettify (ems : ErrorMessage list) (ps : CharStream<'UserState>) =
         let expected    = HashSet<string>()
@@ -320,13 +370,13 @@ module Parser =
     let run (p : Parser<'T, unit>) (s : string) : ParserResult<'T, unit> =
         let ps = CharStream(s, ())
         let r = p ps
-        if r.Ok then ParseSuccessful (r.Result, ps.Position)
+        if r.Ok then Success (r.Result, ps.UserState, ps.Position)
         else
             // Failed, now generate error message
             ps.SetPosition 0
-            ps.SetGenerateErrorMessages true
+            ps.SetNoErrorMessages false
             let r = p ps
-            ParseFailed (prettify r.ErrorMessages ps, ps.Position)
+            Failure (prettify r.ErrorMessages ps, ps.Position, ps.UserState)
 
     let inline success (v : 'T) ems    = Reply<'T> (true, v, ems)
     let inline failure ems             = Reply<'T> (false, Unchecked.defaultof<'T>, ems)
@@ -341,30 +391,23 @@ module Parser =
     let eof : Parser<unit, 'UserState> =
         let ems = [Expected "EOF"]
         fun ps ->
-            match ps.IsEndOfStream with
-            | false -> failure ems
-            | true  -> success () ems
+            if ps.IsEndOfStream then
+                success () ems
+            else
+                failure ems
 
     let spaces : Parser<unit, 'UserState> =
-        let test = CharTest.Adapt <| fun ch _ -> Char.IsWhiteSpace ch
         fun ps ->
-            ignore <| ps.Match 0 Int32.MaxValue test
+            ps.SkipWhitespaces ()
             success () noErrors
 
     let skipChar (c : char): Parser<unit, 'UserState> =
         let test = CharTest.Adapt <| fun ch _ -> ch = c
         let ems = [expectedChar c]
         fun ps ->
-            let ss = ps.Match 1 1 test
-            if not ss.IsEmpty then success () ems
+            let ch = ps.MatchChar test
+            if ch <> eosChar then success () ems
             else failure ems
-
-    let attempt (p : Parser<'T, 'UserState>) : Parser<'T, 'UserState> =
-        fun ps ->
-            let pos = ps.Position
-            let r = p ps
-            if r.Error then ps.SetPosition pos
-            r
 
     let orElse (l : Parser<'T, 'UserState>) (r : Parser<'T, 'UserState>) : Parser<'T, 'UserState> =
         fun ps ->
@@ -423,32 +466,31 @@ module Parser =
 
     let skipSatisfyImpl (test : CharTest) (ems : ErrorMessage list) : Parser<unit, 'UserState> =
         fun ps ->
-            let ss = ps.Match 1 1 test
-            if not ss.IsEmpty then success () ems
+            let ch = ps.MatchChar test
+            if ch <> eosChar then success () ems
             else failure ems
 
     let satisfyImpl (test : CharTest) (ems : ErrorMessage list) : Parser<char, 'UserState> =
         fun ps ->
-            let ss = ps.Match 1 1 test
-            if not ss.IsEmpty then success (ss.Char 0) ems
+            let ch = ps.MatchChar test
+            if ch <> eosChar then success ch ems
             else failure ems
 
     let skipAnyOf (s : string) : Parser<unit, 'UserState> =
-        let fastSet     = fastAnyOf s true
-        let test        = CharTest.Adapt <| fun ch p -> fastSet.Invoke(ch,p)
-        let ems         = s |> Seq.map expectedChar |> Seq.toList
+        let test        = FSharpFuncWrap<char,int,bool>(fastAnyOf s true)
+        let ems         = [Expected <| "any char in '" + s + "'"]
         skipSatisfyImpl test ems
 
     let anyOf (s : string) : Parser<char, 'UserState> =
         let fastSet     = fastAnyOf s true
         let test        = CharTest.Adapt <| fun ch p -> fastSet.Invoke(ch,p)
-        let ems         = s |> Seq.map expectedChar |> Seq.toList
+        let ems         = [Expected <| "any char in '" + s + "'"]
         satisfyImpl test ems
 
     let noneOf (s : string) : Parser<char, 'UserState> =
         let fastSet     = fastAnyOf s false
         let test        = CharTest.Adapt <| fun ch p -> fastSet.Invoke(ch,p)
-        let ems         = s |> Seq.map notExpectedChar |> Seq.toList
+        let ems         = [Expected <| "any char in '" + s + "'"]
         satisfyImpl test ems
 
     let digit : Parser<char, 'UserState> =
@@ -546,10 +588,11 @@ module Parser =
                 let r = p ps
                 me.Merge ps r.ErrorMessages
                 if r.Ok then result <- Some r.Result
-
-            match result with
-            | None          -> failure me.Errors
-            | Some v        -> success v me.Errors
+            
+            if result.IsSome then
+                success result.Value me.Errors
+            else
+                failure me.Errors
 
     let between
             (b : Parser<_, 'UserState>)
@@ -562,13 +605,13 @@ module Parser =
         let ems     = [expectedChar c]
         let test    = CharTest.Adapt <| fun ch _ -> ch = c
         fun ps ->
-            let ss = ps.Match 1 1 test
-            if not ss.IsEmpty then success v ems
+            let ch = ps.MatchChar test
+            if ch <> eosChar then success v ems
             else failure ems
 
     let stringReturn (s : string) (v : 'T) : Parser<'T, 'UserState> =
-        let length      = s.Length
-        let ems         = [Expected <| "'" + s + "'"]
+        let length  = s.Length
+        let ems     = [Expected <| "'" + s + "'"]
         let test    = CharTest.Adapt <| fun ch p -> s.[p] = ch
         fun ps ->
             let ss = ps.Match length length test
@@ -638,6 +681,41 @@ module Parser =
                 else
                     success (result |> Seq.toList) me.Errors
 
+    let createParserForwardedToRef () =
+        let dummyParser = fun stream -> failwith "a parser created with createParserForwardedToRef was not initialized"
+        let r = ref dummyParser
+        (fun stream -> !r stream), r : Parser<_,'u> * Parser<_,'u> ref
+
+    let fastChoice (parsers : (string*Parser<'T, 'UserState>) list) : Parser<'T, 'UserState> =
+        let choices = parsers |> List.map (fun (anyOf,v) -> (anyOf, Some v))
+        let fm = fastMap choices None
+        let buildString (ss : string list) = 
+            let sb = StringBuilder()
+            for s in ss do
+                ignore <| sb.Append s
+            sb.ToString ()
+        let ems =
+            parsers
+            |> List.collect (fun (anyOf,_) -> anyOf |> Seq.toList)
+            |> Seq.distinct
+            |> Seq.sort
+            |> Seq.toArray
+            |> fun cs -> [Expected <| "any char in '" + System.String(cs) + "'"]
+        fun ps ->
+            if ps.IsEndOfStream then failure ems
+            else
+                let ch  = ps.Peek ()
+                let f   = fm.Invoke(ch, 0)
+                if f.IsSome then
+                    let p = f.Value
+                    let me  = initialMerge ps ems
+                    let r   = p ps
+                    me.Merge ps r.ErrorMessages
+                    if r.Ok then success r.Result me.Errors
+                    else failure me.Errors
+                else
+                    failure ems
+
     // JSON parsers specifics (should be FParsec compatible)
 
     let hex2int c =
@@ -652,7 +730,7 @@ module Parser =
 
     let p_ws            : Parser<unit, unit>        = spaces
     let p_token token   : Parser<unit, unit>        = skipChar token
-    let p_wstoken token : Parser<unit, unit>        = attempt (p_ws >>. p_token token)
+    let p_wstoken token : Parser<unit, unit>        = p_token token .>> p_ws
 
     let p_escape        : Parser<char, unit>      =
             anyOf """"\/bfnrt"""
@@ -710,48 +788,50 @@ module Parser =
     let p_string        : Parser<JsonValue, unit>    = p_stringLiteral       |>> JsonValue.String
     let p_number        : Parser<JsonValue, unit>    = p_numberLiteral       |>> JsonValue.Float
 
-    let rec p_value     : Parser<JsonValue, unit>    =
+    let rec p_member        : Parser<string*JsonValue, unit> =
+        p_stringLiteral .>> p_ws .>> (p_wstoken ':') .>>. p_value
+    and p_object        : Parser<JsonValue, unit>        =
+        between (p_wstoken '{') (p_token '}') (sepBy p_member (p_wstoken ',') |>> (List.toArray >> JsonValue.Record))
+    and p_array         : Parser<JsonValue, unit>        =
+        between (p_wstoken '[') (p_token ']') (sepBy p_value (p_wstoken ',') |>> (List.toArray >> JsonValue.Array))
+    and p_value     : Parser<JsonValue, unit>    =
         let p =
             lazy
-                p_ws
-                >>. choice
+                fastChoice
                     [
-                        p_null
-                        p_true
-                        p_false
-                        p_string
-                        p_number
-                        p_object
-                        p_array
+                        "n"             , p_null
+                        "t"             , p_true
+                        "f"             , p_false
+                        "\""            , p_string
+                        "-0123456789"   , p_number
+                        "{"             , p_object
+                        "["             , p_array
                     ]
+                .>> p_ws
         fun ps -> p.Value ps
-    and p_member        : Parser<string*JsonValue, unit> =
-        p_ws >>. p_stringLiteral .>> p_ws .>> (p_token ':') .>>. p_value
-    and p_object        : Parser<JsonValue, unit>        =
-        between (p_token '{') (p_wstoken '}') (sepBy p_member (p_wstoken ',') |>> (List.toArray >> JsonValue.Record))
-    and p_array         : Parser<JsonValue, unit>        =
-        between (p_token '[') (p_wstoken ']') (sepBy p_value (p_wstoken ',') |>> (List.toArray >> JsonValue.Array))
 
-    let p_root          : Parser<JsonValue, unit>        = p_ws
-                                                            >>. choice
-                                                                [
-                                                                    p_object
-                                                                    p_array
-                                                                ]
 
-    let p_json  = p_root .>> p_ws .>> eof
-    let p_jsons = (many p_root) .>> p_ws .>> eof
+    let p_root          : Parser<JsonValue, unit>        = 
+        choice
+            [
+                p_object
+                p_array
+            ]
+        .>> p_ws
+
+    let p_json  = p_ws >>. p_root .>> eof
+    let p_jsons = p_ws >>. (many p_root) .>> eof
 
     type JsonParserNew(jsonText:string, cultureInfo : CultureInfo option, tolerateErrors : bool) =
         member x.Parse () =
             match run p_json jsonText with
-            | ParseSuccessful (json, pos) -> json
-            | ParseFailed (msg, pos)  -> failwith msg
+            | Success (json, _, pos) -> json
+            | Failure (msg, pos, _)  -> failwith msg
 
         member x.ParseMultiple () =
             match run p_jsons jsonText with
-            | ParseSuccessful (json, pos) -> json :> seq<JsonValue>
-            | ParseFailed (msg, pos)  -> failwith msg
+            | Success (json, _, pos) -> json :> seq<JsonValue>
+            | Failure (msg, pos, _)  -> failwith msg
 
     type JsonParserOld(jsonText:string, cultureInfo, tolerateErrors) =
 

@@ -356,37 +356,43 @@ let runSampleTestCases (newParser : string->seq<JsonValue>) (oldParser : string-
 let runPerformanceTestCases (newParser : string->seq<JsonValue>) (oldParser : string->seq<JsonValue>) =
     printfn "Running performance test cases"
 
+    let testCases =
+        [
+            100000  ,"contacts.json"
+            100     ,"topics.json"
+            500     ,"GitHub.json"
+        ]
+
     let samplePath      = Path.Combine (AppDomain.CurrentDomain.BaseDirectory, "TestData")
-    let documentPath    = Path.Combine (samplePath, "topics.json")
 
-    try
-        let document = File.ReadAllText documentPath
+    for (iterations, testCase) in testCases do
+        let documentPath    = Path.Combine (samplePath, testCase)
+        try
+            let document = File.ReadAllText documentPath
 
-        // Dry run
-        ignore <| newParser document
-        ignore <| oldParser document
+            // Dry run
+            ignore <| newParser document
+            ignore <| oldParser document
 
-        let iterations  = 100
+            printfn "Running %d iterations on document: %s using old parser" iterations documentPath
+            let oldStopWatch   = Stopwatch()
+            oldStopWatch.Start()
+            for i in 1..iterations do
+                ignore (oldParser document |> Seq.toList)
+            oldStopWatch.Stop()
 
-        printfn "Running %d iterations on document: %s using old parser" iterations documentPath
-        let oldStopWatch   = Stopwatch()
-        oldStopWatch.Start()
-        for i in 1..iterations do
-            ignore (oldParser document |> Seq.toList)
-        oldStopWatch.Stop()
+            printfn "Running %d iterations on document: %s using new parser" iterations documentPath
+            let newStopWatch   = Stopwatch()
+            newStopWatch.Start()
+            for i in 1..iterations do
+                ignore (newParser document |> Seq.toList)
+            newStopWatch.Stop()
 
-        printfn "Running %d iterations on document: %s using new parser" iterations documentPath
-        let newStopWatch   = Stopwatch()
-        newStopWatch.Start()
-        for i in 1..iterations do
-            ignore (newParser document |> Seq.toList)
-        newStopWatch.Stop()
+            printfn "Result: Old parser: %d ms, new parser: %d ms" oldStopWatch.ElapsedMilliseconds newStopWatch.ElapsedMilliseconds
 
-        printfn "Result: Old parser: %d ms, new parser: %d ms" oldStopWatch.ElapsedMilliseconds newStopWatch.ElapsedMilliseconds
-
-    with
-        e -> 
-            failure <| sprintf "Parsed failed for document: %s, message: %s" documentPath e.Message
+        with
+            e -> 
+                failure <| sprintf "Parsed failed for document: %s, message: %s" documentPath e.Message
 
 let testErrorMessage (parser : string->JsonValue) = 
     let testCases =
@@ -424,9 +430,9 @@ let main argv =
     printfn "Testing new Parser"
     runTestCases            newParse
     runSampleTestCases      newParseMultiple oldParseMultiple
-    runPerformanceTestCases newParseMultiple oldParseMultiple
     testErrorMessage        newParse
+    runPerformanceTestCases newParseMultiple oldParseMultiple
 
     printfn "Testing old Parser"
-    runTestCases            oldParse
+    //runTestCases            oldParse
     0
