@@ -432,9 +432,9 @@ let main argv =
 
     printfn "Testing new Parser"
     runTestCases            newParse
-//    runSampleTestCases      newParseMultiple oldParseMultiple
-//    testErrorMessage        newParse
-//    runPerformanceTestCases newParseMultiple oldParseMultiple
+    runSampleTestCases      newParseMultiple oldParseMultiple
+    testErrorMessage        newParse
+    runPerformanceTestCases newParseMultiple oldParseMultiple
 
 //    printfn "Testing old Parser"
 //    runTestCases            oldParse

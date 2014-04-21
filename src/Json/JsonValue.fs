@@ -206,6 +206,7 @@ module Parser =
         let mutable position            = 0
         let mutable noErrorMessages     = true
 
+        member x.StateTag               = position
         member x.Input                  = input
         member x.Position               = position
         member x.UserState              = userState
@@ -250,6 +251,7 @@ module Parser =
                     Substring(i,``begin``, stopped)
 
         member x.MatchChar (test : CharTest) : char =
+
             let i           = input
             let pos         = position
             let length      = i.Length
@@ -261,6 +263,7 @@ module Parser =
                 eosChar
 
         member x.SkipWhitespaces () : unit =
+
             let i           = input
             let length      = i.Length
 
@@ -293,30 +296,18 @@ module Parser =
     let notExpectedAnyOf   (anyOf  : string)   = 
         NotExpected  <| if anyOf.Length = 1 then "'" + anyOf + "'" else "any char in '" + anyOf + "'"
 
-    type MergedErrors() =
-        let mutable pos     = -1
-        let mutable errors  = []
-
-        member x.Merge (ps : CharStream<'Result>) (newErrors : ErrorMessage list) =
-            if ps.NoErrorMessages then
-                ()
-            else
-                let newPos = ps.Position
-                if newPos <> pos then
-                    pos <- newPos
-                    errors <- newErrors
-                else
-                    errors <- newErrors@errors
-        member x.Errors = errors
-
-
-    let inline initialMerge (ps : CharStream<'Result>) (r : ErrorMessage list) : MergedErrors =
-        let me = MergedErrors()
-        me.Merge ps r
-        me
-
-    let inline emptyMerge (ps : CharStream<'Result>) : MergedErrors =
-        initialMerge ps []
+    let inline mergeErrors 
+        (noErrorMessages    : bool              )
+        (previousStateTag   : int               ) 
+        (currentStateTag    : int               ) 
+        (previousErrors     : ErrorMessage list ) 
+        (currentErrors      : ErrorMessage list ) 
+        : ErrorMessage list =
+        if noErrorMessages then noErrors
+        elif previousStateTag < currentStateTag then
+            currentErrors
+        else
+            currentErrors@previousErrors
 
     [<Struct>]
     type Reply<'Result>(isOk : bool, result : 'Result, errorMessages : ErrorMessage list) =
@@ -418,14 +409,16 @@ module Parser =
 
     let orElse (l : Parser<'T, 'UserState>) (r : Parser<'T, 'UserState>) : Parser<'T, 'UserState> =
         fun ps ->
+            let stateTag0 = ps.StateTag
             let rl = l ps
-            let me = initialMerge ps rl.ErrorMessages
+            let mutable ems = rl.ErrorMessages
             if rl.Ok then rl
             else
+                let stateTag1 = ps.StateTag
                 let rr = r ps
-                me.Merge ps rr.ErrorMessages
-                if rr.Ok then success rr.Result me.Errors
-                else failure me.Errors
+                ems <- mergeErrors ps.NoErrorMessages stateTag0 stateTag1 ems rr.ErrorMessages
+                if rr.Ok then success rr.Result ems
+                else failure ems
     let ( <|> ) = orElse
 
     let map (p : Parser<'TFrom, 'UserState>) (m : 'TFrom->'TTo) : Parser<'TTo, 'UserState> =
@@ -437,38 +430,44 @@ module Parser =
 
     let combine (l : Parser<'L, 'UserState>) (r : Parser<'R, 'UserState>) : Parser<'L*'R, 'UserState> =
         fun ps ->
+            let stateTag0 = ps.StateTag
             let rl = l ps
-            let me = initialMerge ps rl.ErrorMessages
+            let mutable ems = rl.ErrorMessages
             if rl.Error then failure rl.ErrorMessages
             else
+                let stateTag1 = ps.StateTag
                 let rr = r ps
-                me.Merge ps rr.ErrorMessages
-                if rr.Error then failure me.Errors
-                else success (rl.Result, rr.Result) me.Errors
+                ems <- mergeErrors ps.NoErrorMessages stateTag0 stateTag1 ems rr.ErrorMessages
+                if rr.Error then failure ems
+                else success (rl.Result, rr.Result) ems
     let ( .>>. ) = combine
 
     let keepLeft (l : Parser<'L, 'UserState>) (r : Parser<'R, 'UserState>) : Parser<'L, 'UserState> =
         fun ps ->
+            let stateTag0 = ps.StateTag
             let rl = l ps
-            let me = initialMerge ps rl.ErrorMessages
+            let mutable ems = rl.ErrorMessages
             if rl.Error then failure rl.ErrorMessages
             else
+                let stateTag1 = ps.StateTag
                 let rr = r ps
-                me.Merge ps rr.ErrorMessages
-                if rr.Error then failure me.Errors
-                else success rl.Result me.Errors
+                ems <- mergeErrors ps.NoErrorMessages stateTag0 stateTag1 ems rr.ErrorMessages
+                if rr.Error then failure ems
+                else success rl.Result ems
     let ( .>> ) = keepLeft
 
     let keepRight (l : Parser<'L, 'UserState>) (r : Parser<'R, 'UserState>) : Parser<'R, 'UserState> =
         fun ps ->
+            let stateTag0 = ps.StateTag
             let rl = l ps
-            let me = initialMerge ps rl.ErrorMessages
+            let mutable ems = rl.ErrorMessages
             if rl.Error then failure rl.ErrorMessages
             else
+                let stateTag1 = ps.StateTag
                 let rr = r ps
-                me.Merge ps rr.ErrorMessages
-                if rr.Error then failure me.Errors
-                else success rr.Result me.Errors
+                ems <- mergeErrors ps.NoErrorMessages stateTag0 stateTag1 ems rr.ErrorMessages
+                if rr.Error then failure ems
+                else success rr.Result ems
     let ( >>. ) = keepRight
 
     let skipSatisfyImpl (test : CharTest) (ems : ErrorMessage list) : Parser<unit, 'UserState> =
@@ -518,23 +517,6 @@ module Parser =
         let ems = [Expected "HexDigit"]
         fun ps -> satisfyImpl test ems ps
 
-    let pipe2
-            (p0 : Parser<'T0, 'UserState>)
-            (p1 : Parser<'T1, 'UserState>)
-            (m  : 'T0->'T1->'T)
-            : Parser<'T, 'UserState> =
-        let fm = FSharpFunc<_,_,_>.Adapt m
-        fun ps ->
-            let r0 = p0 ps
-            let me = initialMerge ps r0.ErrorMessages
-            if r0.Error then failure me.Errors
-            else
-                let r1 = p1 ps
-                me.Merge ps r1.ErrorMessages
-                if r1.Error then failure me.Errors
-                else
-                    success (fm.Invoke(r0.Result, r1.Result)) me.Errors
-
     let pipe3
             (p0 : Parser<'T0, 'UserState>)
             (p1 : Parser<'T1, 'UserState>)
@@ -543,19 +525,22 @@ module Parser =
             : Parser<'T, 'UserState> =
         let fm = FSharpFunc<_,_,_,_>.Adapt m
         fun ps ->
+            let stateTag0 = ps.StateTag
             let r0 = p0 ps
-            let me = initialMerge ps r0.ErrorMessages
-            if r0.Error then failure me.Errors
+            let mutable ems = r0.ErrorMessages
+            if r0.Error then failure ems
             else
+                let stateTag1 = ps.StateTag
                 let r1 = p1 ps
-                me.Merge ps r1.ErrorMessages
-                if r1.Error then failure me.Errors
+                ems <- mergeErrors ps.NoErrorMessages stateTag0 stateTag1 ems r1.ErrorMessages
+                if r1.Error then failure ems
                 else
+                    let stateTag2 = ps.StateTag
                     let r2 = p2 ps
-                    me.Merge ps r2.ErrorMessages
-                    if r2.Error then failure me.Errors
+                    ems <- mergeErrors ps.NoErrorMessages stateTag1 stateTag2 ems r2.ErrorMessages
+                    if r2.Error then failure ems
                     else
-                        success (fm.Invoke(r0.Result, r1.Result, r2.Result)) me.Errors
+                        success (fm.Invoke(r0.Result, r1.Result, r2.Result)) ems
 
     let pipe4
             (p0 : Parser<'T0, 'UserState>)
@@ -566,40 +551,47 @@ module Parser =
             : Parser<'T, 'UserState> =
         let fm = FSharpFunc<_,_,_,_,_>.Adapt m
         fun ps ->
+            let stateTag0 = ps.StateTag
             let r0 = p0 ps
-            let me = initialMerge ps r0.ErrorMessages
-            if r0.Error then failure me.Errors
+            let mutable ems = r0.ErrorMessages
+            if r0.Error then failure ems
             else
+                let stateTag1 = ps.StateTag
                 let r1 = p1 ps
-                me.Merge ps r1.ErrorMessages
-                if r1.Error then failure me.Errors
+                ems <- mergeErrors ps.NoErrorMessages stateTag0 stateTag1 ems r1.ErrorMessages
+                if r1.Error then failure ems
                 else
+                    let stateTag2 = ps.StateTag
                     let r2 = p2 ps
-                    me.Merge ps r2.ErrorMessages
-                    if r2.Error then failure me.Errors
+                    ems <- mergeErrors ps.NoErrorMessages stateTag1 stateTag2 ems r2.ErrorMessages
+                    if r2.Error then failure ems
                     else
+                        let stateTag3 = ps.StateTag
                         let r3 = p3 ps
-                        me.Merge ps r3.ErrorMessages
-                        if r3.Error then failure me.Errors
+                        ems <- mergeErrors ps.NoErrorMessages stateTag2 stateTag3 ems r3.ErrorMessages
+                        if r3.Error then failure ems
                         else
-                            success (fm.Invoke(r0.Result, r1.Result, r2.Result, r3.Result)) me.Errors
+                            success (fm.Invoke(r0.Result, r1.Result, r2.Result, r3.Result)) ems
 
     let choice (parsers : Parser<'T, 'UserState> list) : Parser<'T, 'UserState> =
         fun ps ->
-            let me = emptyMerge ps
+            let mutable stateTag    = ps.StateTag
+            let mutable ems         = []
             let mutable result      = None
             let mutable remaining   = parsers
             while result.IsNone && remaining.Length > 0 do
                 let p = remaining.Head
                 remaining <- remaining.Tail
-                let r = p ps
-                me.Merge ps r.ErrorMessages
+                let newStateTag     = ps.StateTag
+                let r               = p ps
+                ems                 <- mergeErrors ps.NoErrorMessages stateTag newStateTag ems r.ErrorMessages
+                stateTag            <- newStateTag
                 if r.Ok then result <- Some r.Result
             
             if result.IsSome then
-                success result.Value me.Errors
+                success result.Value ems
             else
-                failure me.Errors
+                failure ems
 
     let between
             (b : Parser<_, 'UserState>)
@@ -627,11 +619,14 @@ module Parser =
 
     let many (p : Parser<'T, 'UserState>) : Parser<'T list, 'UserState> =
         fun ps ->
-            let me      = emptyMerge ps
+            let mutable stateTag    = ps.StateTag
+            let mutable ems         = []
             let result  = List<'T>(initialCapacity)
             while
-                let r = p ps in // TODO: Why is this in required?
-                let _ = me.Merge ps r.ErrorMessages in
+                let newStateTag = ps.StateTag in 
+                let r           = p ps in 
+                let _           = ems <- mergeErrors ps.NoErrorMessages stateTag newStateTag ems r.ErrorMessages in
+                let _           = stateTag <- newStateTag in
                 if r.Error then false
                 else
                     result.Add r.Result
@@ -639,15 +634,18 @@ module Parser =
                 do
                 ()
 
-            success (result |> Seq.toList) me.Errors
+            success (result |> Seq.toList) ems
 
     let manyChars (p : Parser<char, 'UserState>) : Parser<string, 'UserState> =
         fun ps ->
-            let me      = emptyMerge ps
+            let mutable stateTag    = ps.StateTag
+            let mutable ems         = []
             let result  = StringBuilder()
             while
-                let r = p ps in // TODO: Why is this in required?
-                let _ = me.Merge ps r.ErrorMessages in
+                let newStateTag = ps.StateTag in // TODO: Why is this in required?
+                let r           = p ps in 
+                let _           = ems <- mergeErrors ps.NoErrorMessages stateTag newStateTag ems r.ErrorMessages in
+                let _           = stateTag <- newStateTag in
                 if r.Error then false
                 else
                     ignore <| result.Append r.Result
@@ -655,27 +653,32 @@ module Parser =
                 do
                 ()
 
-            success (result.ToString()) me.Errors
+            success (result.ToString()) ems
 
     let sepBy (p : Parser<'T, 'UserState>) (sep : Parser<_, 'UserState>) : Parser<'T list, 'UserState> =
         fun ps ->
             let result  = List<'T>(initialCapacity)
 
-            let ri  = p ps
-            let me  = initialMerge ps ri.ErrorMessages
+            let mutable stateTag    = ps.StateTag
+            let ri                  = p ps
+            let mutable ems         = ri.ErrorMessages
 
-            if ri.Error then success [] me.Errors
+            if ri.Error then success [] ems
             else
                 let mutable failed = false
 
                 result.Add ri.Result
                 while
-                    let rs = sep ps in  // TODO: Why is this in required?
-                    let _ = me.Merge ps rs.ErrorMessages in
+                    let sepStateTag = ps.StateTag in // TODO: Why is this in required?
+                    let rs          = sep ps in  
+                    let _           = ems <- mergeErrors ps.NoErrorMessages stateTag sepStateTag ems rs.ErrorMessages in
+                    let _           = stateTag <- sepStateTag in
                     if rs.Error then false
                     else
-                        let r = p ps
-                        me.Merge ps r.ErrorMessages
+                        let newStateTag = ps.StateTag 
+                        let r           = p ps
+                        ems             <- mergeErrors ps.NoErrorMessages stateTag newStateTag ems r.ErrorMessages
+                        stateTag        <- newStateTag
                         if r.Error then
                             failed <- true
                             false
@@ -684,9 +687,9 @@ module Parser =
                             true
                     do
                     ()
-                if failed then failure me.Errors
+                if failed then failure ems
                 else
-                    success (result |> Seq.toList) me.Errors
+                    success (result |> Seq.toList) ems
 
     let createParserForwardedToRef () =
         let dummyParser = fun stream -> failwith "a parser created with createParserForwardedToRef was not initialized"
@@ -713,12 +716,10 @@ module Parser =
                 let ch  = ps.Peek ()
                 let f   = fm.Invoke(ch, 0)
                 if f.IsSome then
-                    let p = f.Value
-                    let me  = initialMerge ps ems
-                    let r   = p ps
-                    me.Merge ps r.ErrorMessages
-                    if r.Ok then success r.Result me.Errors
-                    else failure me.Errors
+                    let p           = f.Value
+                    let r           = p ps
+                    if r.Ok then success r.Result r.ErrorMessages
+                    else failure r.ErrorMessages
                 else
                     failure ems
 
