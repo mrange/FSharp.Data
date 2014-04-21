@@ -309,9 +309,9 @@ let runTestCases (parser : string->JsonValue) =
     let generatedTestCases = [ for i in 1..1000 -> generateTestCase random ]
 
     let testCases = 
-        manualTestCases
+//        manualTestCases
 //        generatedTestCases
-//        manualTestCases@generatedTestCases
+        manualTestCases@generatedTestCases
 
     for json,expected in testCases do
         try
@@ -359,9 +359,9 @@ let runPerformanceTestCases (newParser : string->seq<JsonValue>) (oldParser : st
 
     let testCases =
         [
-            100000  ,"contacts.json"
-            100     ,"topics.json"
-            500     ,"GitHub.json"
+            100000  , "contacts.json"
+            100     , "topics.json"
+            500     , "GitHub.json"
         ]
 
     let samplePath      = Path.Combine (AppDomain.CurrentDomain.BaseDirectory, "TestData")
@@ -432,10 +432,10 @@ let main argv =
 
     printfn "Testing new Parser"
     runTestCases            newParse
-    runSampleTestCases      newParseMultiple oldParseMultiple
-    testErrorMessage        newParse
-    runPerformanceTestCases newParseMultiple oldParseMultiple
+//    runSampleTestCases      newParseMultiple oldParseMultiple
+//    testErrorMessage        newParse
+//    runPerformanceTestCases newParseMultiple oldParseMultiple
 
-    printfn "Testing old Parser"
-    //runTestCases            oldParse
+//    printfn "Testing old Parser"
+//    runTestCases            oldParse
     0
