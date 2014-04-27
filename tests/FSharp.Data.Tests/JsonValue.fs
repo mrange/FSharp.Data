@@ -241,51 +241,51 @@ let ``Pretty printing works``() =
   "z": []
 }""")
 
-let IsFloatNear (l : float) (r : float) =
-    if r < 16. * Double.Epsilon then
-        l < 16. * Double.Epsilon
-    else
-        let d = 1E-10
-        let ratio = l / r
-        ratio < (1. + d) && ratio > (1. - d)
-
-let rec IsJsonEqual (l : JsonValue) (r : JsonValue) =
-    match l,r with
-    | JsonValue.Null        , JsonValue.Null                                        -> true
-    | JsonValue.Boolean lb  , JsonValue.Boolean rb when lb = rb                     -> true
-    | JsonValue.String  ls  , JsonValue.String  rs when ls = rs                     -> true
-    | JsonValue.Float   lf  , JsonValue.Float   rf when IsFloatNear lf rf           -> true // The reasons we do a custom isEqual
-    | JsonValue.Float   lf  , JsonValue.Number  rd when IsFloatNear lf (float rd)   -> true // The reasons we do a custom isEqual
-    | JsonValue.Number  ld  , JsonValue.Float   rf when IsFloatNear (float ld) rf   -> true // The reasons we do a custom isEqual
-    | JsonValue.Number  ld  , JsonValue.Number  rd when ld = rd                     -> true // The reasons we do a custom isEqual
-    | JsonValue.Array   lvs , JsonValue.Array   rvs ->
-        if lvs.Length <> rvs.Length then false
-        else
-            let mutable res = true
-            let mutable i   = 0
-            let length      = lvs.Length
-            while res && i < length do
-                let li = lvs.[i]
-                let ri = rvs.[i]
-                res <- IsJsonEqual li ri
-                i <- i + 1
-            res
-    | JsonValue.Record  lms , JsonValue.Record  rms ->
-        if lms.Length <> rms.Length then false
-        else
-            let mutable res = true
-            let mutable i   = 0
-            let length      = lms.Length
-            while res && i < length do
-                let (ln,li) = lms.[i]
-                let (rn,ri) = rms.[i]
-                res <- (ln = rn) && IsJsonEqual li ri
-                i <- i + 1
-            res
-    | _ -> false
-
 [<Test>]
 let ``Can parse various JSON documents``() =
+    let IsFloatNear (l : float) (r : float) =
+        if r < 16. * Double.Epsilon then
+            l < 16. * Double.Epsilon
+        else
+            let d = 1E-10
+            let ratio = l / r
+            ratio < (1. + d) && ratio > (1. - d)
+
+    let rec IsJsonEqual (l : JsonValue) (r : JsonValue) =
+        match l,r with
+        | JsonValue.Null        , JsonValue.Null                                        -> true
+        | JsonValue.Boolean lb  , JsonValue.Boolean rb when lb = rb                     -> true
+        | JsonValue.String  ls  , JsonValue.String  rs when ls = rs                     -> true
+        | JsonValue.Float   lf  , JsonValue.Float   rf when IsFloatNear lf rf           -> true // The reasons we do a custom isEqual
+        | JsonValue.Float   lf  , JsonValue.Number  rd when IsFloatNear lf (float rd)   -> true // The reasons we do a custom isEqual
+        | JsonValue.Number  ld  , JsonValue.Float   rf when IsFloatNear (float ld) rf   -> true // The reasons we do a custom isEqual
+        | JsonValue.Number  ld  , JsonValue.Number  rd when ld = rd                     -> true // The reasons we do a custom isEqual
+        | JsonValue.Array   lvs , JsonValue.Array   rvs ->
+            if lvs.Length <> rvs.Length then false
+            else
+                let mutable res = true
+                let mutable i   = 0
+                let length      = lvs.Length
+                while res && i < length do
+                    let li = lvs.[i]
+                    let ri = rvs.[i]
+                    res <- IsJsonEqual li ri
+                    i <- i + 1
+                res
+        | JsonValue.Record  lms , JsonValue.Record  rms ->
+            if lms.Length <> rms.Length then false
+            else
+                let mutable res = true
+                let mutable i   = 0
+                let length      = lms.Length
+                while res && i < length do
+                    let (ln,li) = lms.[i]
+                    let (rn,ri) = rms.[i]
+                    res <- (ln = rn) && IsJsonEqual li ri
+                    i <- i + 1
+                res
+        | _ -> false
+
     let Array   = JsonValue.Array
     let Null    = JsonValue.Null
     let Boolean = JsonValue.Boolean
