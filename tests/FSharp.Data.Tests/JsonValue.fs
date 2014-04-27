@@ -349,7 +349,10 @@ let ``Can parse various JSON documents``() =
             """{"a":[]  ,  "b":{}}"""               , Some <| Record [|"a",Array [||];"b",Record [||]|]
             // Negative tests
             """0"""                                 , None
+            """1234"""                              , None
             """true"""                              , None
+            """false"""                             , None
+            """ "Test" """                          , None
             """[NaN]"""                             , None
             """[,]"""                               , None
             """[true,]"""                           , None
