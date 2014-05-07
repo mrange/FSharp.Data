@@ -75,80 +75,80 @@
     <Compile Include="..\..\src\Json\JsonValue.fs">
       <Link>FSharp.Data\JsonValue.fs</Link>
     </Compile>
-      <Content Include="..\..\tests\FSharp.Data.Tests\Data\contacts.json">
-          <Link>TestData\contacts.json</Link>
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </Content>
-      <Content Include="..\..\tests\FSharp.Data.Tests\Data\Dates.json">
-          <Link>TestData\Dates.json</Link>
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </Content>
-      <Content Include="..\..\tests\FSharp.Data.Tests\Data\DoubleNested.json">
-          <Link>TestData\DoubleNested.json</Link>
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </Content>
-      <Content Include="..\..\tests\FSharp.Data.Tests\Data\Empty.json">
-          <Link>TestData\Empty.json</Link>
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </Content>
-      <Content Include="..\..\tests\FSharp.Data.Tests\Data\GitHub.json">
-          <Link>TestData\GitHub.json</Link>
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </Content>
-      <Content Include="..\..\tests\FSharp.Data.Tests\Data\Nested.json">
-          <Link>TestData\Nested.json</Link>
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </Content>
-      <Content Include="..\..\tests\FSharp.Data.Tests\Data\optionals.json">
-          <Link>TestData\optionals.json</Link>
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </Content>
-      <Content Include="..\..\tests\FSharp.Data.Tests\Data\OptionValues.json">
-          <Link>TestData\OptionValues.json</Link>
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </Content>
-      <Content Include="..\..\tests\FSharp.Data.Tests\Data\projects.json">
-          <Link>TestData\projects.json</Link>
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </Content>
-      <Content Include="..\..\tests\FSharp.Data.Tests\Data\Simple.json">
-          <Link>TestData\Simple.json</Link>
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </Content>
-      <Content Include="..\..\tests\FSharp.Data.Tests\Data\SimpleArray.json">
-          <Link>TestData\SimpleArray.json</Link>
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </Content>
-      <Content Include="..\..\tests\FSharp.Data.Tests\Data\topics.json">
-          <Link>TestData\topics.json</Link>
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </Content>
-      <Content Include="..\..\tests\FSharp.Data.Tests\Data\TwitterSample.json">
-          <Link>TestData\TwitterSample.json</Link>
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </Content>
-      <Content Include="..\..\tests\FSharp.Data.Tests\Data\TwitterStream.json">
-          <Link>TestData\TwitterStream.json</Link>
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </Content>
-      <Content Include="..\..\tests\FSharp.Data.Tests\Data\WikiData.json">
-          <Link>TestData\WikiData.json</Link>
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </Content>
-      <Content Include="..\..\tests\FSharp.Data.Tests\Data\Vindinium.json">
-          <Link>TestData\Vindinium.json</Link>
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </Content>
-      <Content Include="..\..\tests\FSharp.Data.Tests\Data\WorldBank.json">
-          <Link>TestData\WorldBank.json</Link>
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </Content>
-
-      <Compile Include="JsonReferenceParser.fs" />
+    <Content Include="..\..\tests\FSharp.Data.Tests\Data\contacts.json">
+      <Link>TestData\contacts.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\tests\FSharp.Data.Tests\Data\Dates.json">
+      <Link>TestData\Dates.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\tests\FSharp.Data.Tests\Data\DoubleNested.json">
+      <Link>TestData\DoubleNested.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\tests\FSharp.Data.Tests\Data\Empty.json">
+      <Link>TestData\Empty.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\tests\FSharp.Data.Tests\Data\GitHub.json">
+      <Link>TestData\GitHub.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\tests\FSharp.Data.Tests\Data\Nested.json">
+      <Link>TestData\Nested.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\tests\FSharp.Data.Tests\Data\optionals.json">
+      <Link>TestData\optionals.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\tests\FSharp.Data.Tests\Data\OptionValues.json">
+      <Link>TestData\OptionValues.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\tests\FSharp.Data.Tests\Data\projects.json">
+      <Link>TestData\projects.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\tests\FSharp.Data.Tests\Data\Simple.json">
+      <Link>TestData\Simple.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\tests\FSharp.Data.Tests\Data\SimpleArray.json">
+      <Link>TestData\SimpleArray.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\tests\FSharp.Data.Tests\Data\topics.json">
+      <Link>TestData\topics.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\tests\FSharp.Data.Tests\Data\TwitterSample.json">
+      <Link>TestData\TwitterSample.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\tests\FSharp.Data.Tests\Data\TwitterStream.json">
+      <Link>TestData\TwitterStream.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\tests\FSharp.Data.Tests\Data\WikiData.json">
+      <Link>TestData\WikiData.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\tests\FSharp.Data.Tests\Data\Vindinium.json">
+      <Link>TestData\Vindinium.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\tests\FSharp.Data.Tests\Data\WorldBank.json">
+      <Link>TestData\WorldBank.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Compile Include="JsonReferenceParser.fs" />
     <Compile Include="TestSupport.fs" />
     <Compile Include="Program.fs" />
     <None Include="App.config" />
     <None Include="packages.config" />
+    <Content Include="TODO.txt" />
   </ItemGroup>
   <PropertyGroup>
     <MinimumVisualStudioVersion Condition="'$(MinimumVisualStudioVersion)' == ''">11</MinimumVisualStudioVersion>

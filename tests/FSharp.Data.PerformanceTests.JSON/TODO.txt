@@ -1,0 +1,7 @@
+﻿JsonParser Performance TODO:
+============================
+
+1. Char.IsDigit/Char.IsWhitespace can be replaced with faster switch cases
+2. In the context of embedded unicode characters the string parser should be
+   written in such way that it don't create unnecessary substrings
+
