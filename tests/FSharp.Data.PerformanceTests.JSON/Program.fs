@@ -11,7 +11,7 @@ let GetTestCases () =
     let testDataDir = Path.Combine (baseDir, "TestData")
 
     let files       = Directory.GetFiles (testDataDir, "*.json") 
-                        |> Array.filter (fun f -> f.Contains("optionals"))
+//                        |> Array.filter (fun f -> f.Contains("optionals"))
     
     files
 

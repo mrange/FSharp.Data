@@ -26,8 +26,22 @@
         | _ when c >= 'A' && c <= 'F'   -> (int c) - (int 'A') + 10
         | _                             -> 0
 
-    let makeDouble (d : int) (i : int64) (n :int) (f : float) (e : float) =
-        ((float d) * (pown 10. n) + (float i) + f)*e
+    let isDigit1To9 ch = ch >= '0' && ch <= '9'
+
+    let makeDouble (i : uint64) (d :int) (n :int) (f : float) (e : float) =
+        let result = ((float i) * (pown 10. (n - d)) + f)*e
+        result
+    
+    let stringToInt (digits : string) =                             
+        let limit           = System.UInt64.MaxValue / 10UL
+        let mutable result  = 0UL
+        let mutable iter    = 0
+        let length          = digits.Length
+        while result <= limit && iter < length do
+            result <- 10UL * result + (uint64 <| hex2int digits.[iter])
+            iter <- iter + 1
+        result,iter,digits.Length
+
 
     let p_ws            : Parser<unit, unit>        = spaces
     let p_token token   : Parser<unit, unit>        = skipChar token
@@ -55,31 +69,25 @@
     let p_stringLiteral : Parser<string, unit>      =
         between (p_token '"') (p_token '"') (manyChars p_char)
 
-    let p_digit1To9     : Parser<char, unit>        = anyOf "123456789"
-    let p_digit         : Parser<int, unit>         = digit |>> hex2int
-    let p_int           : Parser<int64*int, unit>   = many p_digit |>> (fun digits ->
-                            let mutable result = 0L
-                            for d in digits do
-                                result <- 10L * result + (int64 d)
-                            result,digits.Length
-                        )
-    let p_e             : Parser<float, unit>       =
+    
+
+    let p_int           : Parser<uint64*int*int, unit>  = many1Satisfy isDigit |>> stringToInt
+    let p_int1To9       : Parser<uint64*int*int, unit>  = many1Satisfy2 isDigit1To9 isDigit |>> stringToInt
+    let p_e             : Parser<float, unit>           =
         skipAnyOf "eE" >>. (choice [charReturn '-' 0.1;charReturn '+' 10.] <|> preturn 10.)
-    let p_exponent      : Parser<float, unit>       =
-        p_e .>>. p_int |>> (fun (exp, (i,_)) -> pown exp (int i)) <|> preturn 1.
-    let p_fraction      : Parser<float, unit>       =
-        (p_token '.' >>. (p_int |>> (fun (v,n) -> (float v) * (pown 0.1 n)))) <|> preturn 0.
-    let p_sign          : Parser<float, unit>       =
+    let p_exponent      : Parser<float, unit>           =
+        p_e .>>. p_int |>> (fun (exp, (i,_,_)) -> pown exp (int i)) <|> preturn 1.
+    let p_fraction      : Parser<float, unit>           =
+        (p_token '.' >>. (p_int |>> (fun (v,d,_) -> (float v) * (pown 0.1 d)))) <|> preturn 0.
+    let p_sign          : Parser<float, unit>           =
         (charReturn '-' -1.) <|> preturn 1.
-    let p_digit19       : Parser<int, unit>         =
-        p_digit1To9 |>> hex2int
-    let p_numberLiteral : Parser<float, unit>       =
+    let p_numberLiteral : Parser<float, unit>           =
         p_sign .>>. choice
                         [
                             // JSON doesn't allow numbers like 0123 (has to be 123).
                             // This is probably to avoid issues with octals numbers
-                            pipe3 (p_token '0') p_fraction p_exponent (fun _ f e -> makeDouble 0 0L 0 f e)
-                            pipe4 p_digit19 p_int p_fraction p_exponent (fun d (v,n) f e -> makeDouble d v n f e)
+                            pipe3 (p_token '0') p_fraction p_exponent (fun _ f e -> makeDouble 0UL 0 0 f e)
+                            pipe3 p_int1To9 p_fraction p_exponent (fun (v,d,n) f e -> makeDouble v d n f e)
                         ] |>> (fun (s,n) -> s*n)
 
 
