@@ -47,9 +47,9 @@ let PerformanceTest (debug : bool) =
     let testCases = 
         [
         //  n         min     max     json test data
-//            100     , 4.    , 6.    , "TwitterStream.json"
-//            100     , 4.    , 6.    , "topics.json"
-//            1000    , 3.    , 5.    , "WorldBank.json"
+            100     , 4.    , 6.    , "TwitterStream.json"
+            100     , 4.    , 6.    , "topics.json"
+            1000    , 3.    , 5.    , "WorldBank.json"
             1000    , 5.    , 7.    , "GitHub.json"
         ] |> List.map (fun (n,min,max,tc) -> n,min,max,tc,testData.[tc])
 
@@ -61,15 +61,15 @@ let PerformanceTest (debug : bool) =
         let reference       = timeIt debug (sprintf "Reference: %s" fileName  ) n <| fun () -> JsonReferenceParser.parseMultiple jsonData |> eval
         let fsharpData      = timeIt debug (sprintf "FSharp.Data: %s" fileName) n <| fun () -> JsonValue.ParseMultiple jsonData |> eval
 
-        let maxTime         = int64 <| (float reference) / min
-        let minTime         = int64 <| (float reference) / max
-        let success         = minTime < fsharpData && fsharpData < maxTime
+        let ratio           = float reference / float fsharpData
+        let success         = min < ratio && ratio < max
         let msg             = sprintf 
-                                "Performance test %s, reference: %d, min: %d, max: %d, time: %d: %s" 
+                                "Performance test %s, ratio: %.1f < %.2f < %.1f, reference: %d, time: %d, fileName: %s" 
                                 (if success then "success" else "failed")
+                                min
+                                ratio
+                                max
                                 reference 
-                                minTime 
-                                maxTime 
                                 fsharpData 
                                 fileName
         if debug || (not success) then
