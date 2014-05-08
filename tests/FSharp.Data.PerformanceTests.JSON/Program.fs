@@ -47,10 +47,10 @@ let PerformanceTest (debug : bool) =
     let testCases = 
         [
         //  n         min     max     json test data
-            100     , 4.    , 6.    , "TwitterStream.json"
-            100     , 4.    , 6.    , "topics.json"
-            1000    , 3.    , 5.    , "WorldBank.json"
-            1000    , 5.    , 7.    , "GitHub.json"
+            100     , 4.5   , 5.5   , "TwitterStream.json"
+            100     , 5.0   , 6.0   , "topics.json"
+            1000    , 3.5   , 4.5   , "WorldBank.json"
+            1000    , 6.0   , 7.0   , "GitHub.json"
         ] |> List.map (fun (n,min,max,tc) -> n,min,max,tc,testData.[tc])
 
     printfn "Performance checking JSON Parser based on %d testcases" testCases.Length
