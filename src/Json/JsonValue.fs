@@ -102,6 +102,41 @@ module JsonValue =
 // JSON parser
 // --------------------------------------------------------------------------------------
 
+module JsonParserHelpers = 
+    let inline isNumChar c decimalSeparator =
+        match c with
+        | '0'
+        | '1'
+        | '2'
+        | '3'
+        | '4'
+        | '5'
+        | '6'
+        | '7'
+        | '8'
+        | '9'
+        | 'E'
+        | 'e'
+        | '+'
+        | '-'
+            -> true
+        | _ -> c = decimalSeparator
+
+    let inline isWhitespace c =
+        match c with
+        | ' '
+        | '\r'
+        | '\n'
+        | '\t'
+            -> true
+        | _ -> false
+
+    let hexdigit d =
+        if d >= '0' && d <= '9' then int32 d - int32 '0'
+        elif d >= 'a' && d <= 'f' then int32 d - int32 'a' + 10
+        elif d >= 'A' && d <= 'F' then int32 d - int32 'A' + 10
+        else failwith "hexdigit"
+
 type private JsonParser(jsonText:string, cultureInfo, tolerateErrors) =
 
     let cultureInfo = defaultArg cultureInfo CultureInfo.InvariantCulture
@@ -111,11 +146,9 @@ type private JsonParser(jsonText:string, cultureInfo, tolerateErrors) =
 
     // Helper functions
     let skipWhitespace() =
-      while i < s.Length && Char.IsWhiteSpace s.[i] do
+      while i < s.Length && JsonParserHelpers.isWhitespace s.[i] do
         i <- i + 1
     let decimalSeparator = cultureInfo.NumberFormat.NumberDecimalSeparator.[0]
-    let isNumChar c =
-      Char.IsDigit c || c=decimalSeparator || c='e' || c='E' || c='+' || c='-'
     let throw() =
       let msg =
         sprintf
@@ -130,9 +163,19 @@ type private JsonParser(jsonText:string, cultureInfo, tolerateErrors) =
         skipWhitespace()
         ensure(i < s.Length)
         match s.[i] with
+        | '0'
+        | '1'
+        | '2'
+        | '3'
+        | '4'
+        | '5'
+        | '6'
+        | '7'
+        | '8'
+        | '9'
+        | '-' 
+            -> parseNum()
         | '"' -> JsonValue.String(parseString())
-        | '-' -> parseNum()
-        | c when Char.IsDigit(c) -> parseNum()
         | '{' -> parseObject()
         | '[' -> parseArray()
         | 't' -> parseLiteral("true", JsonValue.Boolean true)
@@ -166,15 +209,10 @@ type private JsonParser(jsonText:string, cultureInfo, tolerateErrors) =
                 | '"' -> buf.Append('"') |> ignore
                 | 'u' ->
                     ensure(i+5 < s.Length)
-                    let hexdigit d =
-                        if d >= '0' && d <= '9' then int32 d - int32 '0'
-                        elif d >= 'a' && d <= 'f' then int32 d - int32 'a' + 10
-                        elif d >= 'A' && d <= 'F' then int32 d - int32 'A' + 10
-                        else failwith "hexdigit"
-                    let unicodeChar (s:string) =
-                        if s.Length <> 4 then failwith "unicodeChar";
-                        char (hexdigit s.[0] * 4096 + hexdigit s.[1] * 256 + hexdigit s.[2] * 16 + hexdigit s.[3])
-                    let ch = unicodeChar (s.Substring(i+2, 4))
+                    let ch = char<| JsonParserHelpers.hexdigit s.[i+2] * 4096 + 
+                                    JsonParserHelpers.hexdigit s.[i+3] * 256 + 
+                                    JsonParserHelpers.hexdigit s.[i+4] * 16 + 
+                                    JsonParserHelpers.hexdigit s.[i+5]
                     buf.Append(ch) |> ignore
                     i <- i + 4  // the \ and u will also be skipped past further below
                 | _ -> throw()
@@ -188,7 +226,7 @@ type private JsonParser(jsonText:string, cultureInfo, tolerateErrors) =
 
     and parseNum() =
         let start = i
-        while i < s.Length && isNumChar(s.[i]) do
+        while i < s.Length && JsonParserHelpers.isNumChar s.[i] decimalSeparator do
             i <- i + 1
         let len = i - start
         match TextConversions.AsDecimal cultureInfo (s.Substring(start,len)) with
