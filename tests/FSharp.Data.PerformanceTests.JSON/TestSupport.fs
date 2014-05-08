@@ -3,8 +3,9 @@
     open System
     open System.Diagnostics
 
-    let timeIt msg n (a : unit -> unit) =
-        printfn "Beginning '%s'..." msg
+    let timeIt debug msg n (a : unit -> unit) =
+        if debug then
+            printfn "Beginning '%s'..." msg
 
         // Dry run
         a ()
@@ -15,7 +16,9 @@
         sw.Stop ()
 
         let diff = sw.ElapsedMilliseconds
-        printfn "Completed '%s' in %d ms" msg diff
+        if debug then
+            printfn "Completed '%s' in %d ms" msg diff
+
         diff
 
     // Checks if two floats are "near" eachother

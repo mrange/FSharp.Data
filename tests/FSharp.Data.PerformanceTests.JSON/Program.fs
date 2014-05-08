@@ -47,8 +47,10 @@ let PerformanceTest (debug : bool) =
     let testCases = 
         [
         //  n         min     max     json test data
-            100     , 4.    , 6.    , "TwitterStream.json"
-            1000    , 3.    , 5.    , "WorldBank.json"
+//            100     , 4.    , 6.    , "TwitterStream.json"
+//            100     , 4.    , 6.    , "topics.json"
+//            1000    , 3.    , 5.    , "WorldBank.json"
+            1000    , 5.    , 7.    , "GitHub.json"
         ] |> List.map (fun (n,min,max,tc) -> n,min,max,tc,testData.[tc])
 
     printfn "Performance checking JSON Parser based on %d testcases" testCases.Length
@@ -56,8 +58,8 @@ let PerformanceTest (debug : bool) =
     for n,min,max,fileName,filePath in testCases do
         let jsonData        = File.ReadAllText filePath
         let eval            = Seq.toList >> ignore
-        let reference       = timeIt (sprintf "Reference: %s" fileName  ) n <| fun () -> JsonReferenceParser.parseMultiple jsonData |> eval
-        let fsharpData      = timeIt (sprintf "FSharp.Data: %s" fileName) n <| fun () -> JsonValue.ParseMultiple jsonData |> eval
+        let reference       = timeIt debug (sprintf "Reference: %s" fileName  ) n <| fun () -> JsonReferenceParser.parseMultiple jsonData |> eval
+        let fsharpData      = timeIt debug (sprintf "FSharp.Data: %s" fileName) n <| fun () -> JsonValue.ParseMultiple jsonData |> eval
 
         let maxTime         = int64 <| (float reference) / min
         let minTime         = int64 <| (float reference) / max
