@@ -1,6 +1,22 @@
 ﻿module TestSupport
     open FSharp.Data
     open System
+    open System.Diagnostics
+
+    let timeIt msg n (a : unit -> unit) =
+        printfn "Beginning '%s'..." msg
+
+        // Dry run
+        a ()
+
+        let sw = Stopwatch.StartNew ()
+        for i in 0..n-1 do
+            a ()
+        sw.Stop ()
+
+        let diff = sw.ElapsedMilliseconds
+        printfn "Completed '%s' in %d ms" msg diff
+        diff
 
     // Checks if two floats are "near" eachother
     let isNear (l : float) (r : float) = 
