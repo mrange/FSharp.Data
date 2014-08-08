@@ -46,6 +46,16 @@ let ``Reading a required float that is not a valid float returns NaN`` () =
   prov.A |> should equal Double.NaN
 
 [<Test>]
+let ``Can control typeinference`` () =
+  let inferred = JsonProvider<""" [ {"a":"123"} ] """, NoTypeInference=false>.GetSamples()
+  let i : int = inferred.[0].A
+  i |> should equal 123
+
+  let notInferred = JsonProvider<""" [ {"a":"123"} ] """, NoTypeInference=true>.GetSamples()
+  let s : string = notInferred.[0].A
+  s |> should equal "123"
+
+[<Test>]
 let ``Optional int correctly inferred`` () = 
   let prov = JsonProvider<""" [ {"a":123}, {"a":null} ] """>.GetSamples()
   let i = prov.[0].A

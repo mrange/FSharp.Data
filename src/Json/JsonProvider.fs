@@ -36,6 +36,7 @@ type public JsonProvider(cfg:TypeProviderConfig) as this =
     let encodingStr = args.[4] :?> string
     let resolutionFolder = args.[5] :?> string
     let resource = args.[6] :?> string
+    let noTypeInference = args.[7] :?> bool
 
     let cultureInfo = TextRuntime.GetCulture cultureStr
     let parseSingle _ value = JsonValue.Parse(value, cultureInfo)
@@ -46,7 +47,7 @@ type public JsonProvider(cfg:TypeProviderConfig) as this =
     let getSpecFromSamples samples = 
 
       let inferedType = using (IO.logTime "Inference" sample) <| fun _ ->
-        [ for sampleJson in samples -> JsonInference.inferType cultureInfo "" sampleJson ]
+        [ for sampleJson in samples -> JsonInference.inferType noTypeInference cultureInfo "" sampleJson ]
         |> Seq.fold (StructuralInference.subtypeInfered (*allowEmptyValues*)false) StructuralTypes.Top
 
       using (IO.logTime "TypeGeneration" sample) <| fun _ ->
@@ -72,7 +73,8 @@ type public JsonProvider(cfg:TypeProviderConfig) as this =
       ProvidedStaticParameter("Culture", typeof<string>, parameterDefaultValue = "") 
       ProvidedStaticParameter("Encoding", typeof<string>, parameterDefaultValue = "") 
       ProvidedStaticParameter("ResolutionFolder", typeof<string>, parameterDefaultValue = "")
-      ProvidedStaticParameter("EmbeddedResource", typeof<string>, parameterDefaultValue = "") ]
+      ProvidedStaticParameter("EmbeddedResource", typeof<string>, parameterDefaultValue = "")
+      ProvidedStaticParameter("NoTypeInference", typeof<bool>, parameterDefaultValue = false) ]
 
   let helpText = 
     """<summary>Typed representation of a JSON document.</summary>
