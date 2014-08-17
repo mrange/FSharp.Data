@@ -230,3 +230,5 @@
 * Allow to serialize a JsonValue to a TextWriter.
 * Fixed possible memory leak.
 * Accept any MIME type in HTTP requests made by CsvProvider, JsonProvider, and XmlProvider (but still issue a preference).
+* Fix usage of customizeHttpRequest on POST requests.
+* Fixed problem on url creation when ampersands are used in query parameter values.
