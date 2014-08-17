@@ -17,17 +17,19 @@ let rec inferType noTypeInference cultureInfo parentName json =
   let inline inrange lo hi v = (v >= decimal lo) && (v <= decimal hi)
   let inline integer v = Math.Round(v:decimal) = v
 
+  let useTypeInference = not noTypeInference
+
   match json with
   // Null and primitives without subtyping hiearchies
   | JsonValue.Null -> InferedType.Null
   | JsonValue.Boolean _ -> InferedType.Primitive(typeof<bool>, None, false)
-  | JsonValue.String s when not noTypeInference -> StructuralInference.getInferedTypeFromString cultureInfo s None
+  | JsonValue.String s when useTypeInference -> StructuralInference.getInferedTypeFromString cultureInfo s None
   | JsonValue.String _ -> InferedType.Primitive(typeof<string>, None, false)
   // For numbers, we test if it is integer and if it fits in smaller range
-  | JsonValue.Number 0M when not noTypeInference -> InferedType.Primitive(typeof<Bit0>, None, false)
-  | JsonValue.Number 1M when not noTypeInference -> InferedType.Primitive(typeof<Bit1>, None, false)
-  | JsonValue.Number n when (not noTypeInference) && inrange Int32.MinValue Int32.MaxValue n && integer n -> InferedType.Primitive(typeof<int>, None, false)
-  | JsonValue.Number n when (not noTypeInference) && inrange Int64.MinValue Int64.MaxValue n && integer n -> InferedType.Primitive(typeof<int64>, None, false)
+  | JsonValue.Number 0M when useTypeInference -> InferedType.Primitive(typeof<Bit0>, None, false)
+  | JsonValue.Number 1M when useTypeInference -> InferedType.Primitive(typeof<Bit1>, None, false)
+  | JsonValue.Number n when useTypeInference && inrange Int32.MinValue Int32.MaxValue n && integer n -> InferedType.Primitive(typeof<int>, None, false)
+  | JsonValue.Number n when useTypeInference && inrange Int64.MinValue Int64.MaxValue n && integer n -> InferedType.Primitive(typeof<int64>, None, false)
   | JsonValue.Number _ -> InferedType.Primitive(typeof<decimal>, None, false)
   | JsonValue.Float _ -> InferedType.Primitive(typeof<float>, None, false)
   // More interesting types 

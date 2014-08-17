@@ -45,15 +45,30 @@ let ``Reading a required float that is not a valid float returns NaN`` () =
   let prov = DecimalFields.Parse(""" {"a":"hello", "b":123} """)
   prov.A |> should equal Double.NaN
 
-[<Test>]
-let ``Can control typeinference`` () =
-  let inferred = JsonProvider<""" [ {"a":"123"} ] """, NoTypeInference=false>.GetSamples()
-  let i : int = inferred.[0].A
-  i |> should equal 123
+[<Literal>] 
+let typeInferenceJson = """ [ {"intLike":"123", "boolLike1":0, "boolLike2":"1"}, {"intLike":"321", "boolLike1":1, "boolLike2":"0"} ] """
 
-  let notInferred = JsonProvider<""" [ {"a":"123"} ] """, NoTypeInference=true>.GetSamples()
-  let s : string = notInferred.[0].A
-  s |> should equal "123"
+[<Test>]
+let ``Can control type inference`` () =
+  let inferred = JsonProvider<typeInferenceJson, NoTypeInference=false>.GetSamples().[0]
+
+  let intLike   : int  = inferred.IntLike
+  let boolLike1 : bool = inferred.BoolLike1
+  let boolLike2 : bool = inferred.BoolLike2
+
+  intLike   |> should equal 123
+  boolLike1 |> should equal false
+  boolLike2 |> should equal true
+
+  let notInferred = JsonProvider<typeInferenceJson, NoTypeInference=true>.GetSamples().[0]
+
+  let intLike   : string    = notInferred.IntLike
+  let boolLike1 : decimal   = notInferred.BoolLike1
+  let boolLike2 : string    = notInferred.BoolLike2
+
+  intLike   |> should equal "123"
+  boolLike1 |> should equal 0M
+  boolLike2 |> should equal "1"
 
 [<Test>]
 let ``Optional int correctly inferred`` () = 
