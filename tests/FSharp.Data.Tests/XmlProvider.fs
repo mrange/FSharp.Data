@@ -13,12 +13,9 @@ open NUnit.Framework
 open FsUnit
 open FSharp.Data
 
-[<Literal>] 
-let typeInferenceXml = """<XS><X intLike="123" boolLike="0"/><X intLike="321" boolLike="1"/></XS>"""
-
 [<Test>]
 let ``Can control type inference`` () =
-  let inferred = XmlProvider<typeInferenceXml, NoTypeInference=false>.GetSample().Xs.[0]
+  let inferred = XmlProvider<"Data/TypeInference.xml", NoTypeInference=false>.GetSample().Xs.[0]
 
   let intLike   : int  = inferred.IntLike
   let boolLike  : bool = inferred.BoolLike
@@ -26,7 +23,7 @@ let ``Can control type inference`` () =
   intLike   |> should equal 123
   boolLike  |> should equal false
 
-  let notInferred = XmlProvider<typeInferenceXml, NoTypeInference=true>.GetSample().Xs.[0]
+  let notInferred = XmlProvider<"Data/TypeInference.xml", NoTypeInference=true>.GetSample().Xs.[0]
 
   let intLike   : string    = notInferred.IntLike
   let boolLike  : string    = notInferred.BoolLike

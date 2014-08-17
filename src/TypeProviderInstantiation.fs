@@ -31,7 +31,8 @@ type XmlProviderArgs =
       Culture : string
       Encoding : string
       ResolutionFolder : string
-      EmbeddedResource : string }
+      EmbeddedResource : string 
+      NoTypeInference : bool }
 
 type JsonProviderArgs = 
     { Sample : string
@@ -40,7 +41,8 @@ type JsonProviderArgs =
       Culture : string
       Encoding : string
       ResolutionFolder : string
-      EmbeddedResource : string }
+      EmbeddedResource : string 
+      NoTypeInference : bool }
 
 type WorldBankProviderArgs =
     { Sources : string
@@ -92,7 +94,8 @@ type TypeProviderInstantiation =
                    box x.Culture
                    box x.Encoding
                    box x.ResolutionFolder 
-                   box x.EmbeddedResource |] 
+                   box x.EmbeddedResource
+                   box x.NoTypeInference |] 
             | Json x -> 
                 (fun cfg -> new JsonProvider(cfg) :> TypeProviderForNamespaces),
                 [| box x.Sample
@@ -101,7 +104,8 @@ type TypeProviderInstantiation =
                    box x.Culture
                    box x.Encoding
                    box x.ResolutionFolder 
-                   box x.EmbeddedResource |] 
+                   box x.EmbeddedResource 
+                   box x.NoTypeInference |] 
             | WorldBank x ->
                 (fun cfg -> new WorldBankProvider(cfg) :> TypeProviderForNamespaces),
                 [| box x.Sources
@@ -197,7 +201,8 @@ type TypeProviderInstantiation =
                   Culture = args.[4]
                   Encoding = ""
                   ResolutionFolder = ""
-                  EmbeddedResource = "" }
+                  EmbeddedResource = "" 
+                  NoTypeInference = false }
         | "Json" ->
             Json { Sample = args.[1]
                    SampleIsList = args.[2] |> bool.Parse
@@ -205,7 +210,8 @@ type TypeProviderInstantiation =
                    Culture = args.[4] 
                    Encoding = ""
                    ResolutionFolder = ""
-                   EmbeddedResource = "" }
+                   EmbeddedResource = "" 
+                   NoTypeInference = false }
         | "WorldBank" ->
             WorldBank { Sources = args.[1]
                         Asynchronous = args.[2] |> bool.Parse }
