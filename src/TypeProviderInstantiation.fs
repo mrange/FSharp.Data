@@ -32,7 +32,7 @@ type XmlProviderArgs =
       Encoding : string
       ResolutionFolder : string
       EmbeddedResource : string 
-      NoTypeInference : bool }
+      InferTypesFromValues : bool }
 
 type JsonProviderArgs = 
     { Sample : string
@@ -42,7 +42,7 @@ type JsonProviderArgs =
       Encoding : string
       ResolutionFolder : string
       EmbeddedResource : string 
-      NoTypeInference : bool }
+      InferTypesFromValues : bool }
 
 type WorldBankProviderArgs =
     { Sources : string
@@ -95,7 +95,7 @@ type TypeProviderInstantiation =
                    box x.Encoding
                    box x.ResolutionFolder 
                    box x.EmbeddedResource
-                   box x.NoTypeInference |] 
+                   box x.InferTypesFromValues |] 
             | Json x -> 
                 (fun cfg -> new JsonProvider(cfg) :> TypeProviderForNamespaces),
                 [| box x.Sample
@@ -105,7 +105,7 @@ type TypeProviderInstantiation =
                    box x.Encoding
                    box x.ResolutionFolder 
                    box x.EmbeddedResource 
-                   box x.NoTypeInference |] 
+                   box x.InferTypesFromValues |] 
             | WorldBank x ->
                 (fun cfg -> new WorldBankProvider(cfg) :> TypeProviderForNamespaces),
                 [| box x.Sources
@@ -202,7 +202,7 @@ type TypeProviderInstantiation =
                   Encoding = ""
                   ResolutionFolder = ""
                   EmbeddedResource = "" 
-                  NoTypeInference = false }
+                  InferTypesFromValues = true }
         | "Json" ->
             Json { Sample = args.[1]
                    SampleIsList = args.[2] |> bool.Parse
@@ -211,7 +211,7 @@ type TypeProviderInstantiation =
                    Encoding = ""
                    ResolutionFolder = ""
                    EmbeddedResource = "" 
-                   NoTypeInference = false }
+                   InferTypesFromValues = true }
         | "WorldBank" ->
             WorldBank { Sources = args.[1]
                         Asynchronous = args.[2] |> bool.Parse }

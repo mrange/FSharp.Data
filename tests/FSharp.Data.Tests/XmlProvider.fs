@@ -15,7 +15,7 @@ open FSharp.Data
 
 [<Test>]
 let ``Can control type inference`` () =
-  let inferred = XmlProvider<"Data/TypeInference.xml", NoTypeInference=false>.GetSample().Xs.[0]
+  let inferred = XmlProvider<"Data/TypeInference.xml", InferTypesFromValues=true>.GetSample().Xs.[0]
 
   let intLike   : int  = inferred.IntLike
   let boolLike  : bool = inferred.BoolLike
@@ -23,7 +23,7 @@ let ``Can control type inference`` () =
   intLike   |> should equal 123
   boolLike  |> should equal false
 
-  let notInferred = XmlProvider<"Data/TypeInference.xml", NoTypeInference=true>.GetSample().Xs.[0]
+  let notInferred = XmlProvider<"Data/TypeInference.xml", InferTypesFromValues=false>.GetSample().Xs.[0]
 
   let intLike   : string    = notInferred.IntLike
   let boolLike  : string    = notInferred.BoolLike
