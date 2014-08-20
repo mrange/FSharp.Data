@@ -38,13 +38,14 @@ class XmlProvider+Xs : FDR.XmlElement
 
 
 class XmlProvider+X : FDR.XmlElement
-    new : intLike:int -> boolLike:bool -> XmlProvider+X
+    new : intLike:int -> boolLike:bool -> value:XmlProvider+X2 -> XmlProvider+X
     XmlRuntime.CreateRecord("X", 
                             [| ("intLike",
                                 (intLike :> obj))
                                ("boolLike",
                                 (boolLike :> obj)) |], 
-                            [| |], "")
+                            [| ("",
+                                (value :> obj)) |], "")
 
     new : xElement:System.Xml.Linq.XElement -> XmlProvider+X
     XmlElement.Create(xElement)
@@ -56,5 +57,21 @@ class XmlProvider+X : FDR.XmlElement
     member IntLike: int with get
     let value = XmlRuntime.TryGetAttribute(this, "intLike")
     TextRuntime.GetNonOptionalValue("Attribute intLike", TextRuntime.ConvertInteger("", value), value)
+
+    member Value: XmlProvider+X2 with get
+    XmlRuntime.GetJsonValue(this, "")
+
+
+class XmlProvider+X2 : FDR.IJsonDocument
+    new : a:int -> XmlProvider+X2
+    JsonRuntime.CreateRecord([| ("a",
+                                 (a :> obj)) |], "")
+
+    new : jsonValue:JsonValue -> XmlProvider+X2
+    JsonDocument.Create(jsonValue, "")
+
+    member A: int with get
+    let value = JsonRuntime.TryGetPropertyUnpackedWithPath(this, "a")
+    JsonRuntime.GetNonOptionalValue(value.Path, JsonRuntime.ConvertInteger("", value.JsonOpt), value.JsonOpt)
 
 

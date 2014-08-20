@@ -38,13 +38,14 @@ class XmlProvider+Xs : FDR.XmlElement
 
 
 class XmlProvider+X : FDR.XmlElement
-    new : intLike:string -> boolLike:string -> XmlProvider+X
+    new : intLike:string -> boolLike:string -> value:string -> XmlProvider+X
     XmlRuntime.CreateRecord("X", 
                             [| ("intLike",
                                 (intLike :> obj))
                                ("boolLike",
                                 (boolLike :> obj)) |], 
-                            [| |], "")
+                            [| ("",
+                                (value :> obj)) |], "")
 
     new : xElement:System.Xml.Linq.XElement -> XmlProvider+X
     XmlElement.Create(xElement)
@@ -56,5 +57,9 @@ class XmlProvider+X : FDR.XmlElement
     member IntLike: string with get
     let value = XmlRuntime.TryGetAttribute(this, "intLike")
     TextRuntime.GetNonOptionalValue("Attribute intLike", TextRuntime.ConvertString(value), value)
+
+    member Value: string with get
+    let value = XmlRuntime.TryGetValue(this)
+    TextRuntime.GetNonOptionalValue("Value", TextRuntime.ConvertString(value), value)
 
 
