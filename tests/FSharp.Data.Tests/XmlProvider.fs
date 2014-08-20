@@ -17,19 +17,23 @@ open FSharp.Data
 let ``Can control type inference`` () =
   let inferred = XmlProvider<"Data/TypeInference.xml", InferTypesFromValues=true>.GetSample().Xs.[0]
 
-  let intLike   : int  = inferred.IntLike
-  let boolLike  : bool = inferred.BoolLike
+  let intLike   : int       = inferred.IntLike
+  let boolLike  : bool      = inferred.BoolLike
+  let jsonLike  : int list  = inferred.JsonLike
 
   intLike   |> should equal 123
   boolLike  |> should equal false
+  jsonLike  |> should equal [1;2;3]
 
   let notInferred = XmlProvider<"Data/TypeInference.xml", InferTypesFromValues=false>.GetSample().Xs.[0]
 
   let intLike   : string    = notInferred.IntLike
   let boolLike  : string    = notInferred.BoolLike
+  let jsonLike  : string    = notInferred.JsonLike
 
   intLike   |> should equal "123"
   boolLike  |> should equal "0"
+  jsonLike  |> should equal """{"a":1}"""
 
 type PersonXml = XmlProvider<"""<authors><author name="Ludwig" surname="Wittgenstein" age="29" /></authors>""">
 
