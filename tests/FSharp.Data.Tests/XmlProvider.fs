@@ -19,21 +19,21 @@ let ``Can control type inference`` () =
 
   let intLike   : int       = inferred.IntLike
   let boolLike  : bool      = inferred.BoolLike
-  let jsonLike  : int list  = inferred.JsonLike
+  let jsonValue : JsonValue = inferred.Value.JsonValue
 
   intLike   |> should equal 123
   boolLike  |> should equal false
-  jsonLike  |> should equal [1;2;3]
+  jsonValue |> should equal (JsonValue.Record [|"a",(JsonValue.Number 1.0M)|])
 
   let notInferred = XmlProvider<"Data/TypeInference.xml", InferTypesFromValues=false>.GetSample().Xs.[0]
 
   let intLike   : string    = notInferred.IntLike
   let boolLike  : string    = notInferred.BoolLike
-  let jsonLike  : string    = notInferred.JsonLike
+  let jsonValue : string    = notInferred.Value
 
   intLike   |> should equal "123"
   boolLike  |> should equal "0"
-  jsonLike  |> should equal """{"a":1}"""
+  jsonValue |> should equal """{"a":1}"""
 
 type PersonXml = XmlProvider<"""<authors><author name="Ludwig" surname="Wittgenstein" age="29" /></authors>""">
 
