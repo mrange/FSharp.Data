@@ -52,6 +52,7 @@
     <Compile Include="CommonRuntime\StructuralTypes.fs" />
     <Compile Include="CommonRuntime\StructuralInference.fs" />
     <Compile Include="Json\JsonValue.fs" />
+    <Compile Include="Json\JsonParser.fs" />
     <Compile Include="Json\JsonConversions.fs" />
     <Compile Include="Json\JsonExtensions.fs" />
     <Compile Include="Json\JsonRuntime.fs" />
