@@ -110,6 +110,13 @@ let ``Can parse floats in different cultures``() =
     j?age.AsFloat(CultureInfo.CurrentCulture) |> should equal 25.5
     let j = JsonValue.Parse("{ \"age\": \"25,5\"}", CultureInfo.CurrentCulture)
     j?age.AsFloat(CultureInfo.CurrentCulture) |> should equal 25.5
+    let j = JsonValue.Parse("{ \"age\": 25,5, \"id\":0}", CultureInfo.CurrentCulture)
+    j?age.AsFloat(CultureInfo.CurrentCulture) |> should equal 25.5
+    let j = JsonValue.Parse("[25,5]", CultureInfo.CurrentCulture)
+    j.[0].AsFloat(CultureInfo.CurrentCulture) |> should equal 25.5
+    let j = JsonValue.Parse("[25,5,5,25]", CultureInfo.CurrentCulture)
+    j.[0].AsFloat(CultureInfo.CurrentCulture) |> should equal 25.5
+    j.[1].AsFloat(CultureInfo.CurrentCulture) |> should equal 5.25
 
 [<Test>]
 [<SetCulture("pt-PT")>]
@@ -122,6 +129,13 @@ let ``Can parse decimals in different cultures``() =
     j?age.AsDecimal(CultureInfo.CurrentCulture) |> should equal 25.5m
     let j = JsonValue.Parse("{ \"age\": \"25,5\"}", CultureInfo.CurrentCulture)
     j?age.AsDecimal(CultureInfo.CurrentCulture) |> should equal 25.5m
+    let j = JsonValue.Parse("{ \"age\": 25,5, \"id\":0}", CultureInfo.CurrentCulture)
+    j?age.AsDecimal(CultureInfo.CurrentCulture) |> should equal 25.5m
+    let j = JsonValue.Parse("[25,5]", CultureInfo.CurrentCulture)
+    j.[0].AsDecimal(CultureInfo.CurrentCulture) |> should equal 25.5m
+    let j = JsonValue.Parse("[25,5,5,25]", CultureInfo.GetCultureInfo "sv-SE")
+    j.[0].AsDecimal(CultureInfo.CurrentCulture) |> should equal 25.5m
+    j.[1].AsDecimal(CultureInfo.CurrentCulture) |> should equal 5.25m
 
 [<Test>]
 [<SetCulture("pt-PT")>]
@@ -368,7 +382,11 @@ let ``Can parse various JSON documents``() =
             """{"a":[],}"""                         , None
             """[+123]"""                            , None
             // According to json.org this should fail but currently don't
-            // """[0123]"""                            , None
+            """[01]"""                              , None
+            """[-01]"""                             , None
+            """[1.]"""                              , None
+            """[-.0]"""                             , None
+            """[-0123]"""                           , None
         ]
 
     let testCases = manualTestCases
@@ -380,7 +398,7 @@ let ``Can parse various JSON documents``() =
 
     for json,expected in testCases do
         try
-            let result = JsonValue.Parse json
+            let result = FSharp.Data.JsonParser.parse json
             match expected with
             | Some exp when IsJsonEqual exp result  -> ()
             | Some exp                              -> failure <| sprintf "Parse succeeded but didn't produce expected value\nJSON:\n%s\nExpected:\n%A\nActual:\n%A" json exp result
