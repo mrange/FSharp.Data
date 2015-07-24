@@ -95,9 +95,17 @@ let ``Can parse completely invalid, but close, date as string``() =
     j?anniversary.AsString() |> should equal "2010-02-18T16.5:23.35:4"
 
 [<Test>]
-let ``Can parse UTF-32 unicode characters`` () = 
+let ``Can parse UTF-32 unicode characters`` () =
   let j = JsonValue.Parse """{ "value": "\U00010343\U00010330\U0001033F\U00010339\U0001033B" }"""
   j?value.AsString() |> should equal "\U00010343\U00010330\U0001033F\U00010339\U0001033B"
+
+[<Test>]
+[<SetCulture("sv-SE")>]
+let ``Can parse floats in swedish cultures``() =
+    let j = JsonValue.Parse("[1,2,3]", CultureInfo.CurrentCulture)
+    j.[0].AsFloat(CultureInfo.CurrentCulture) |> should equal 1
+    j.[1].AsFloat(CultureInfo.CurrentCulture) |> should equal 2
+    j.[1].AsFloat(CultureInfo.CurrentCulture) |> should equal 3
 
 [<Test>]
 [<SetCulture("pt-PT")>]
@@ -133,7 +141,7 @@ let ``Can parse decimals in different cultures``() =
     j?age.AsDecimal(CultureInfo.CurrentCulture) |> should equal 25.5m
     let j = JsonValue.Parse("[25,5]", CultureInfo.CurrentCulture)
     j.[0].AsDecimal(CultureInfo.CurrentCulture) |> should equal 25.5m
-    let j = JsonValue.Parse("[25,5,5,25]", CultureInfo.GetCultureInfo "sv-SE")
+    let j = JsonValue.Parse("[25,5,5,25]", CultureInfo.CurrentCulture)
     j.[0].AsDecimal(CultureInfo.CurrentCulture) |> should equal 25.5m
     j.[1].AsDecimal(CultureInfo.CurrentCulture) |> should equal 5.25m
 
@@ -398,22 +406,24 @@ let ``Can parse various JSON documents``() =
 
     for json,expected in testCases do
         try
-            let result = FSharp.Data.JsonParser.parse json
+            let result = JsonConformingParser.parse true json
             match expected with
             | Some exp when IsJsonEqual exp result  -> ()
             | Some exp                              -> failure <| sprintf "Parse succeeded but didn't produce expected value\nJSON:\n%s\nExpected:\n%A\nActual:\n%A" json exp result
             | None                                  -> failure <| sprintf "Parse succeeded but expected to fail\nJSON:\n%s\nActual:\n%A" json result
         with
-            | e ->
+            | JsonConformingParser.JsonParseFailure (msg, pos) ->
                 match expected with
                 | None      -> ()
-                | Some exp  -> failure <| sprintf "Parse failed but expected to succeed\nJSON:\n%s\nExpected:\n%A\nException:\n%A" json exp e
+                | Some exp  -> failure <| sprintf "Parse failed but expected to succeed\nJSON:\n%s\nExpected:\n%A\nException:\n(%s,%d)" json exp msg pos
+            | e ->
+                failure <| sprintf "Parse failed with wrong exception\nJSON:\n%s\nExpected:\nJsonParseFailure (msg,pos)\nException:\n%A" json e
 
     if failures.Length > 0 then
         Assert.Fail <| failures.ToString ()
 
 [<Test>]
-let ``Basic special characters encoded correctly`` () = 
+let ``Basic special characters encoded correctly`` () =
   let input = " \"quoted\" and \'quoted\' and \r\n and \uABCD "
   let w = new IO.StringWriter()
   JsonValue.JsonStringEncodeTo w input
@@ -421,7 +431,7 @@ let ``Basic special characters encoded correctly`` () =
   (w.GetStringBuilder().ToString()) |> should equal expected
 
 [<Test>]
-let ``Encoding of simple string is valid JSON`` () = 
+let ``Encoding of simple string is valid JSON`` () =
   let input = "sample \"json\" with \t\r\n \' quotes etc."
   let w = new IO.StringWriter()
   JsonValue.JsonStringEncodeTo w input

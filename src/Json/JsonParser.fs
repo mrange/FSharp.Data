@@ -9,7 +9,7 @@
 
 namespace FSharp.Data
 
-module JsonParser =
+module JsonConformingParser =
   open System
   open System.Collections.Generic
   open System.Diagnostics
