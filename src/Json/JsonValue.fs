@@ -38,7 +38,7 @@ type JsonValue =
   | Record of properties:(string * JsonValue)[]
   | Array of elements:JsonValue[]
   | Boolean of bool
-  | Null  
+  | Null
 
   /// [omit]
   [<EditorBrowsableAttribute(EditorBrowsableState.Never)>]
@@ -70,11 +70,11 @@ type JsonValue =
           JsonValue.JsonStringEncodeTo w s
           w.Write "\""
       | Record properties ->
-          w.Write "{"                      
+          w.Write "{"
           for i = 0 to properties.Length - 1 do
             let k,v = properties.[i]
             if i > 0 then w.Write ","
-            newLine indentation 2            
+            newLine indentation 2
             w.Write "\""
             JsonValue.JsonStringEncodeTo w k
             w.Write propSep
@@ -90,20 +90,20 @@ type JsonValue =
           if elements.Length > 0 then
             newLine indentation 0
           w.Write "]"
-  
-    serialize 0 x 
+
+    serialize 0 x
 
   // Encode characters that are not valid in JS string. The implementation is based
   // on https://github.com/mono/mono/blob/master/mcs/class/System.Web/System.Web/HttpUtility.cs
   static member internal JsonStringEncodeTo (w:TextWriter) (value:string) =
     if String.IsNullOrEmpty value then ()
-    else 
+    else
       for i = 0 to value.Length - 1 do
         let c = value.[i]
         let ci = int c
         if ci >= 0 && ci <= 7 || ci = 11 || ci >= 14 && ci <= 31 then
           w.Write("\\u{0:x4}", ci) |> ignore
-        else 
+        else
           match c with
           | '\b' -> w.Write "\\b"
           | '\t' -> w.Write "\\t"
@@ -159,7 +159,7 @@ type private JsonParser(jsonText:string, cultureInfo, tolerateErrors) =
     let throw() =
       let msg =
         sprintf
-          "Invalid JSON starting at character %d, snippet = \n----\n%s\n-----\njson = \n------\n%s\n-------" 
+          "Invalid JSON starting at character %d, snippet = \n----\n%s\n-----\njson = \n------\n%s\n-------"
           i (jsonText.[(max 0 (i-10))..(min (jsonText.Length-1) (i+10))]) (if jsonText.Length > 1000 then jsonText.Substring(0, 1000) else jsonText)
       failwith msg
     let ensure cond =
@@ -228,7 +228,7 @@ type private JsonParser(jsonText:string, cultureInfo, tolerateErrors) =
                         let HIGH_TEN_BIT_MASK = 0xFFC00u                     // 1111|1111|1100|0000|0000
                         let LOW_TEN_BIT_MASK = 0x003FFu                      // 0000|0000|0011|1111|1111
                         let leadSurrogate = (codePoint &&& HIGH_TEN_BIT_MASK >>> 10) + 0xD800u
-                        let trailSurrogate = (codePoint &&& LOW_TEN_BIT_MASK) + 0xDC00u                        
+                        let trailSurrogate = (codePoint &&& LOW_TEN_BIT_MASK) + 0xDC00u
                         char leadSurrogate, char trailSurrogate
 
                     let lead, trail = unicodeChar (s.Substring(i+2, 8))
@@ -249,10 +249,11 @@ type private JsonParser(jsonText:string, cultureInfo, tolerateErrors) =
         while i < s.Length && isNumChar(s.[i]) do
             i <- i + 1
         let len = i - start
-        match TextConversions.AsDecimal cultureInfo (s.Substring(start,len)) with
+        let ss  = s.Substring(start,len)
+        match TextConversions.AsDecimal cultureInfo ss with
         | Some x -> JsonValue.Number x
         | _ ->
-            match TextConversions.AsFloat [| |] (*useNoneForMissingValues*)false cultureInfo (s.Substring(start,len)) with
+            match TextConversions.AsFloat [| |] (*useNoneForMissingValues*)false cultureInfo ss with
             | Some x -> JsonValue.Float x
             | _ -> throw()
 
