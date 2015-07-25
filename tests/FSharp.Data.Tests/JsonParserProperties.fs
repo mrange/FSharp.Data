@@ -172,7 +172,7 @@ let ``Stringifing parsed string returns the same string (unicode)`` () =
 
 [<Test>]
 let ``Stringifing parsed string returns the same string (UNICODE)`` () =
-    let input = "{\"=\\U001000111's8\":27670116086083.0138369}"
+    let input = "{\"=\\u001000111's8\":27670116086083.0138369}"
     let jsonValue = JsonValue.Parse input
     let jsonConverted = jsonValue.ToString(JsonSaveOptions.DisableFormatting)
     Assert.AreNotEqual(input, jsonConverted) // this now has the escaped value

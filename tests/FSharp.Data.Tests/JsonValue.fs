@@ -96,16 +96,8 @@ let ``Can parse completely invalid, but close, date as string``() =
 
 [<Test>]
 let ``Can parse UTF-32 unicode characters`` () =
-  let j = JsonValue.Parse """{ "value": "\U00010343\U00010330\U0001033F\U00010339\U0001033B" }"""
-  j?value.AsString() |> should equal "\U00010343\U00010330\U0001033F\U00010339\U0001033B"
-
-[<Test>]
-[<SetCulture("sv-SE")>]
-let ``Can parse floats in swedish cultures``() =
-    let j = JsonValue.Parse("[1,2,3]", CultureInfo.CurrentCulture)
-    j.[0].AsFloat(CultureInfo.CurrentCulture) |> should equal 1
-    j.[1].AsFloat(CultureInfo.CurrentCulture) |> should equal 2
-    j.[1].AsFloat(CultureInfo.CurrentCulture) |> should equal 3
+  let j = JsonValue.Parse """{ "value": "\u00010343\u00010330\u0001033F\u00010339\u0001033B" }"""
+  j?value.AsString() |> should equal "\u00010343\u00010330\u0001033F\u00010339\u0001033B"
 
 [<Test>]
 [<SetCulture("pt-PT")>]
@@ -114,17 +106,6 @@ let ``Can parse floats in different cultures``() =
     j?age.AsFloat() |> should equal 25.5
     let j = JsonValue.Parse "{ \"age\": \"25.5\"}"
     j?age.AsFloat() |> should equal 25.5
-    let j = JsonValue.Parse("{ \"age\": 25,5}", CultureInfo.CurrentCulture)
-    j?age.AsFloat(CultureInfo.CurrentCulture) |> should equal 25.5
-    let j = JsonValue.Parse("{ \"age\": \"25,5\"}", CultureInfo.CurrentCulture)
-    j?age.AsFloat(CultureInfo.CurrentCulture) |> should equal 25.5
-    let j = JsonValue.Parse("{ \"age\": 25,5, \"id\":0}", CultureInfo.CurrentCulture)
-    j?age.AsFloat(CultureInfo.CurrentCulture) |> should equal 25.5
-    let j = JsonValue.Parse("[25,5]", CultureInfo.CurrentCulture)
-    j.[0].AsFloat(CultureInfo.CurrentCulture) |> should equal 25.5
-    let j = JsonValue.Parse("[25,5,5,25]", CultureInfo.CurrentCulture)
-    j.[0].AsFloat(CultureInfo.CurrentCulture) |> should equal 25.5
-    j.[1].AsFloat(CultureInfo.CurrentCulture) |> should equal 5.25
 
 [<Test>]
 [<SetCulture("pt-PT")>]
@@ -133,24 +114,13 @@ let ``Can parse decimals in different cultures``() =
     j?age.AsDecimal() |> should equal 25.5m
     let j = JsonValue.Parse "{ \"age\": \"25.5\"}"
     j?age.AsDecimal() |> should equal 25.5m
-    let j = JsonValue.Parse("{ \"age\": 25,5}", CultureInfo.CurrentCulture)
-    j?age.AsDecimal(CultureInfo.CurrentCulture) |> should equal 25.5m
-    let j = JsonValue.Parse("{ \"age\": \"25,5\"}", CultureInfo.CurrentCulture)
-    j?age.AsDecimal(CultureInfo.CurrentCulture) |> should equal 25.5m
-    let j = JsonValue.Parse("{ \"age\": 25,5, \"id\":0}", CultureInfo.CurrentCulture)
-    j?age.AsDecimal(CultureInfo.CurrentCulture) |> should equal 25.5m
-    let j = JsonValue.Parse("[25,5]", CultureInfo.CurrentCulture)
-    j.[0].AsDecimal(CultureInfo.CurrentCulture) |> should equal 25.5m
-    let j = JsonValue.Parse("[25,5,5,25]", CultureInfo.CurrentCulture)
-    j.[0].AsDecimal(CultureInfo.CurrentCulture) |> should equal 25.5m
-    j.[1].AsDecimal(CultureInfo.CurrentCulture) |> should equal 5.25m
 
 [<Test>]
 [<SetCulture("pt-PT")>]
 let ``Can parse dates in different cultures``() =
     let j = JsonValue.Parse "{ \"birthdate\": \"01/02/2000\"}"
     j?birthdate.AsDateTime().Month |> should equal 1
-    let j = JsonValue.Parse("{ \"birthdate\": \"01/02/2000\"}", CultureInfo.CurrentCulture)
+    let j = JsonValue.Parse("{ \"birthdate\": \"01/02/2000\"}")
     j?birthdate.AsDateTime(CultureInfo.CurrentCulture).Month |> should equal 2
 
 [<Test>]
@@ -344,6 +314,8 @@ let ``Can parse various JSON documents``() =
             """[123450E-2]"""                       , Some <| Array [|Float 1234.50|]
             """[-123450e-2]"""                      , Some <| Array [|Float -1234.50|]
             """[4.26353146520608E+18]"""            , Some <| Array [|Float 4.26353146520608E+18|]
+            """[12345E100]"""                       , Some <| Array [|Float 12345E100|]
+            """[12345E-100]"""                       , Some <| Array [|Float 12345E-100|]
             """[1.2345]"""                          , Some <| Array [|Float 1.2345|]
             """[null,false]"""                      , Some <| Array [|Null;Boolean false|]
             """[{}]"""                              , Some <| Array [|Record [||]|]
@@ -412,7 +384,7 @@ let ``Can parse various JSON documents``() =
             | Some exp                              -> failure <| sprintf "Parse succeeded but didn't produce expected value\nJSON:\n%s\nExpected:\n%A\nActual:\n%A" json exp result
             | None                                  -> failure <| sprintf "Parse succeeded but expected to fail\nJSON:\n%s\nActual:\n%A" json result
         with
-            | JsonConformingParser.JsonParseFailure (msg, pos) ->
+            | JsonParseFailure (msg, pos) ->
                 match expected with
                 | None      -> ()
                 | Some exp  -> failure <| sprintf "Parse failed but expected to succeed\nJSON:\n%s\nExpected:\n%A\nException:\n(%s,%d)" json exp msg pos

@@ -1,6 +1,7 @@
 ﻿namespace ProviderImplementation
 
 open System
+open System.Globalization
 open System.IO
 open Microsoft.FSharp.Core.CompilerServices
 open ProviderImplementation
@@ -33,22 +34,23 @@ type public JsonProvider(cfg:TypeProviderConfig) as this =
     let sampleIsList = args.[1] :?> bool
     let rootName = args.[2] :?> string
     let rootName = if String.IsNullOrWhiteSpace rootName then "Root" else NameUtils.singularize rootName
+    // TODO: mrange - Deprectate cultureStr
+    // TODO: mrange - Introduce extended error info
     let cultureStr = args.[3] :?> string
     let encodingStr = args.[4] :?> string
     let resolutionFolder = args.[5] :?> string
     let resource = args.[6] :?> string
     let inferTypesFromValues = args.[7] :?> bool
 
-    let cultureInfo = TextRuntime.GetCulture cultureStr
-    let parseSingle _ value = JsonValue.Parse(value, cultureInfo)
+    let parseSingle _ value = JsonValue.Parse(value, true)      // TODO: mrange - extended error info
     let parseList _ value = 
-        JsonDocument.CreateList(new StringReader(value), cultureStr)
+        JsonDocument.CreateList(new StringReader(value), true)  // TODO: mrange - extended error info
         |> Array.map (fun doc -> doc.JsonValue)
     
     let getSpecFromSamples samples = 
 
       let inferedType = using (IO.logTime "Inference" sample) <| fun _ ->
-        [ for sampleJson in samples -> JsonInference.inferType inferTypesFromValues cultureInfo "" sampleJson ]
+        [ for sampleJson in samples -> JsonInference.inferType inferTypesFromValues CultureInfo.InvariantCulture "" sampleJson ]
         |> Seq.fold (StructuralInference.subtypeInfered (*allowEmptyValues*)false) InferedType.Top
 
       using (IO.logTime "TypeGeneration" sample) <| fun _ ->
@@ -59,9 +61,9 @@ type public JsonProvider(cfg:TypeProviderConfig) as this =
       { GeneratedType = tpType
         RepresentationType = result.ConvertedType
         CreateFromTextReader = fun reader -> 
-          result.GetConverter ctx <@@ JsonDocument.Create(%reader, cultureStr) @@>
+          result.GetConverter ctx <@@ JsonDocument.Create(%reader, true) @@>        // TODO: mrange - extendedErrorInfo
         CreateFromTextReaderForSampleList = fun reader -> 
-          result.GetConverter ctx <@@ JsonDocument.CreateList(%reader, cultureStr) @@> }
+          result.GetConverter ctx <@@ JsonDocument.CreateList(%reader, true) @@> }  // TODO: mrange - extendedErrorInfo
 
     generateType "JSON" sample sampleIsList parseSingle parseList getSpecFromSamples 
                  version this cfg replacer encodingStr resolutionFolder resource typeName None

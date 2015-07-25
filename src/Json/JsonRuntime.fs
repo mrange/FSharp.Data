@@ -53,21 +53,19 @@ type JsonDocument =
   /// [omit]
   [<EditorBrowsableAttribute(EditorBrowsableState.Never)>]
   [<CompilerMessageAttribute("This method is intended for use in generated code only.", 10001, IsHidden=true, IsError=false)>]
-  static member Create(reader:TextReader, cultureStr) = 
+  static member Create(reader:TextReader, extendedErrorInfo) =
     use reader = reader
     let text = reader.ReadToEnd()
-    let cultureInfo = TextRuntime.GetCulture cultureStr
-    let value = JsonValue.Parse(text, cultureInfo)
+    let value = JsonValue.Parse(text, extendedErrorInfo)
     JsonDocument.Create(value, "")
 
   /// [omit]
   [<EditorBrowsableAttribute(EditorBrowsableState.Never)>]
   [<CompilerMessageAttribute("This method is intended for use in generated code only.", 10001, IsHidden=true, IsError=false)>]
-  static member CreateList(reader:TextReader, cultureStr) = 
+  static member CreateList(reader:TextReader, extendedErrorInfo) =
     use reader = reader
     let text = reader.ReadToEnd()
-    let cultureInfo = TextRuntime.GetCulture cultureStr    
-    match JsonValue.ParseMultiple(text, cultureInfo) |> Seq.toArray with
+    match JsonValue.ParseMultiple(text, extendedErrorInfo) |> Seq.toArray with
     | [| JsonValue.Array array |] -> array
     | array -> array
     |> Array.mapi (fun i value -> JsonDocument.Create(value, "[" + (string i) + "]"))
