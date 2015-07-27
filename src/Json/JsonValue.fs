@@ -167,6 +167,9 @@ module JsonConformingParser =
     let False     = "false"
 
     [<Literal>]
+    let Char              = "char"
+
+    [<Literal>]
     let Digit     = "digit"
 
     [<Literal>]
@@ -177,6 +180,15 @@ module JsonConformingParser =
 
     [<Literal>]
     let NewLine   = "NEWLINE"
+
+    [<Literal>]
+    let Escapes           = "\"\\/bfnrtu"
+
+    [<Literal>]
+    let ValuePreludes     = "\"{[-"
+
+    [<Literal>]
+    let RootValuePreludes = "{["
 
   module internal Details =
 
@@ -191,7 +203,7 @@ module JsonConformingParser =
       elif v > max then max
       else v
 
-    // Min & Max Exponent of float (double)
+    // Min & Max Exponent of float (double) convert to decimal (double are in essence a binary number)
     //  https://en.wikipedia.org/wiki/Double-precision_floating-point_format
 
     [<Literal>]
@@ -211,14 +223,7 @@ module JsonConformingParser =
     let MinimumPow10D = -28
 
     [<Literal>]
-    let MaximumPow10D = 28
-
-    let Pow10TableD =
-      [|
-        for i in MinimumPow10D..MaximumPow10D -> pown 10.M i
-      |]
-
-    let inline pow10d n = Pow10TableD.[clamp (n - MinimumPow10D) 0 (Pow10TableD.Length - 1)]
+    let MaximumPow10D = 0
 
     let inline isWhiteSpace (c : char) : bool =
       c = ' ' || c = '\t' || c = '\n' || c = '\r'
@@ -232,6 +237,58 @@ module JsonConformingParser =
       else
         false
 
+    module UInt96 =
+      let inline trim (ui : uint64) : uint32 = uint32 ui
+
+      let inline addc 
+        (cc : uint32 byref) 
+        (l  : uint32 byref) 
+        (r  : uint32      )  : unit = 
+        let s = uint64 l + uint64 r
+
+        l   <- trim s
+        cc  <- cc + trim (s >>> 32)
+
+      let add 
+        (l0 : uint32 byref)
+        (l1 : uint32 byref)
+        (l2 : uint32 byref)
+        (r  : uint32      ) : bool = 
+        let mutable c0 = 0u
+        let mutable c1 = 0u
+        let mutable c2 = 0u
+
+        addc &c0 &l0 r 
+        addc &c1 &l1 c0
+        addc &c2 &l2 c1
+
+        c2 = 0u
+
+      let inline mul10c 
+        (cc : uint32 byref)
+        (l  : uint32 byref) : unit = 
+        let s = uint64 l * 10UL
+
+        l   <- trim s
+        cc  <- cc + trim (s >>> 32)
+
+      let mul10 
+        (l0 : uint32 byref) 
+        (l1 : uint32 byref)
+        (l2 : uint32 byref) : bool = 
+        let mutable c0 = 0u
+        let mutable c1 = 0u
+        let mutable c2 = 0u
+
+        mul10c &c0 &l0
+        mul10c &c1 &l1
+        mul10c &c2 &l2
+
+        addc &c1 &l1 c0
+        addc &c2 &l2 c1
+
+        c2 = 0u
+
     let emptyString           = ""
     let nullValue             = JsonValue.Null
     let trueValue             = JsonValue.Boolean true
@@ -242,6 +299,8 @@ module JsonConformingParser =
     let inline stringValue s  = JsonValue.String s
     let inline arrayValue vs  = JsonValue.Array vs
     let inline objectValue ms = JsonValue.Record ms
+
+    // TODO: mrange - Lift in latest error message updates from MiniJson
 
     type JsonParser(s : string, epos : int) =
       let sb                = StringBuilder DefaultSize
@@ -299,11 +358,27 @@ module JsonConformingParser =
         x.Expected      (pos, Tokens.True )
         x.Expected      (pos, Tokens.False)
         x.Expected      (pos, Tokens.Digit)
-        x.ExpectedChars (pos, "\"{[-")
+        x.ExpectedChars (pos, Tokens.ValuePreludes)
         false
 
       member x.raise_RootValue () : bool =
-        x.ExpectedChars (pos, "{[")
+        x.ExpectedChars (pos, Tokens.RootValuePreludes)
+        false
+
+      member x.raise_Char () : bool =
+        x.Expected (pos, Tokens.Char)
+        false
+
+      member x.raise_Digit () : bool =
+        x.Expected (pos, Tokens.Digit)
+        false
+
+      member x.raise_HexDigit () : bool =
+        x.Expected (pos, Tokens.HexDigit)
+        false
+
+      member x.raise_Escapes () : bool =
+        x.ExpectedChars (pos, Tokens.Escapes)
         false
 
       member inline x.consume_WhiteSpace () : bool =
@@ -316,7 +391,9 @@ module JsonConformingParser =
         x.neos && x.ch  = c
 
       member inline x.tryConsume_Char (c : char) : bool =
-        if x.eos then x.raise_Eos ()
+        if x.eos then 
+          x.ExpectedChar (pos, c)
+          x.raise_Eos ()
         elif x.ch = c then
           x.adv ()
           true
@@ -330,7 +407,10 @@ module JsonConformingParser =
   #else
       member inline x.tryParse_AnyOf2 (first : char, second : char, r : char byref) : bool =
   #endif
-        if x.eos then x.raise_Eos ()
+        if x.eos then 
+          x.ExpectedChar (pos, first)
+          x.ExpectedChar (pos, second)
+          x.raise_Eos ()
         else
           let c = x.ch
           if c = first || c = second then
@@ -378,37 +458,52 @@ module JsonConformingParser =
         else
           x.raise_Value ()
 
-      member x.tryParse_UInt (first : bool, r : decimal byref) : bool =
-        let z = decimal (int '0')
-        if x.eos then ignore <| x.raise_Eos (); not first
+      member x.tryParse_UInt32 (first : bool, r : uint32 byref) : bool =
+        let z = uint32 '0'
+        if x.eos then x.raise_Digit () || x.raise_Eos () || not first
         else
           let c = x.ch
           if c >= '0' && c <= '9' then
             x.adv ()
-            r <- 10.0M*r + (decimal (int c) - z)
-            x.tryParse_UInt (false, &r)
+            // TODO: mrange - check out of range
+            r <- 10u*r + (uint32 c - z)
+            x.tryParse_UInt32 (false, &r)
           else
-            x.Expected (pos, Tokens.Digit)
-            not first
+            x.raise_Digit () || not first
 
-      member x.tryParse_UInt0 (r : decimal byref) : bool =
+      member x.tryParse_UInt96 (first : bool, r0 : uint32 byref, r1 : uint32 byref, r2 : uint32 byref) : bool =
+        let z = uint32 '0'
+        if x.eos then x.raise_Digit () || x.raise_Eos () || not first
+        else
+          let c = x.ch
+          if c >= '0' && c <= '9' then
+            x.adv ()
+            let a = uint32 c - z
+            if (UInt96.mul10 &r0 &r1 &r2) && (UInt96.add &r0 &r1 &r2 a) then
+              x.tryParse_UInt96 (false, &r0, &r1, &r2)
+            else
+              x.Unexpected (pos, "NumberOutOfRange")
+              false
+          else
+            x.raise_Digit () || not first
+
+      member x.tryParse_UInt96_0 (r0 : uint32 byref, r1 : uint32 byref, r2 : uint32 byref) : bool =
         // tryParse_UInt0 only consumes 0 if input is 0123, this in order to be conformant with spec
         let zero = x.tryConsume_Char '0'
 
         if zero then
-          r <- 0.0M
+          r0 <- 0u
+          r1 <- 0u
+          r2 <- 0u
           true
         else
-          x.tryParse_UInt (true, &r)
+          x.tryParse_UInt96 (true, &r0, &r1, &r2)
 
-      member x.tryParse_Fraction (r : decimal byref) : bool =
+      member x.tryParse_Fraction96 (r0 : uint32 byref, r1 : uint32 byref, r2 : uint32 byref, scale : int byref) : bool =
         if x.tryConsume_Char '.' then
           let spos        = pos
-          let mutable uf  = 0.0M
-          if x.tryParse_UInt (true, &uf) then
-            // TODO: mrange - If fraction is more than 28 digits it exceeds the precision of decimal exponent
-            //  the remaining digits should be ignored
-            r <- uf * (pow10d (spos - pos))
+          if x.tryParse_UInt96 (true, &r0, &r1, &r2) then
+            scale <- pos - spos
             true
           else
             false
@@ -421,9 +516,8 @@ module JsonConformingParser =
           let mutable sign = '+'
           // Ignore as sign is optional
           ignore <| x.tryParse_AnyOf2 ('+', '-', &sign)
-          // TODO: mrange - Parsing exponent as decimal seems unnecessary
-          let mutable ue = 0.0M
-          if x.tryParse_UInt (true, &ue) then
+          let mutable ue = 0u
+          if x.tryParse_UInt32 (true, &ue) then
             let inline sign v = if sign = '-' then -v else v
             r <- sign (int ue)
             true
@@ -436,24 +530,31 @@ module JsonConformingParser =
         let hasSign       = x.tryConsume_Char '-'
         let inline sign v = if hasSign then -v else v
 
-        let mutable i = 0.0M
-        let mutable f = 0.0M
-        let mutable e = 0
+        let mutable r0  = 0u
+        let mutable r1  = 0u
+        let mutable r2  = 0u
+        let mutable s   = 0
+        let mutable exp = 0
 
         let result =
-          x.tryParse_UInt0        (&i)
-          && x.tryParse_Fraction  (&f)
-          && x.tryParse_Exponent  (&e)
+          x.tryParse_UInt96_0       (&r0, &r1, &r2)
+          && x.tryParse_Fraction96  (&r0, &r1, &r2, &s)
+          && x.tryParse_Exponent    (&exp)
+
+        let effectiveExp = exp - s
 
         if result then
-          if e >= MinimumPow10D && e <= MaximumPow10D then
-            v <- decimalValue (sign ((i + f) * (pow10d e)))
+          if effectiveExp >= MinimumPow10D && effectiveExp <= MaximumPow10D then
+            let d = Decimal (int r0, int r1, int r2, hasSign, byte effectiveExp)
+            v <- decimalValue d
             true
-          elif e >= MinimumPow10F && e <= MaximumPow10F then
-            // Number too big for decimal, use float fallback
-            v <- floatValue ((float (sign ((i + f)))) * (pow10f e))
+          elif effectiveExp >= MinimumPow10F && effectiveExp <= MaximumPow10F then
+            // Exponent not in range for decimal, use float fallback
+            let d = Decimal (int r0, int r1, int r2, hasSign, 0uy)
+            let f = float d
+            v <- floatValue (f * (pow10f effectiveExp))
             true
-          elif e < MinimumPow10F then
+          elif effectiveExp < MinimumPow10F then
             v <- decimalValue (sign 0M)
             true
           else
@@ -467,7 +568,7 @@ module JsonConformingParser =
         if n = 0 then
           ignore <| sb.Append (char r)
           true
-        elif x.eos then x.raise_Eos ()
+        elif x.eos then x.raise_HexDigit () || x.raise_Eos ()
         else
           let sr  = r <<< 4
           let   c = x.ch
@@ -475,14 +576,13 @@ module JsonConformingParser =
           elif  c >= 'A' && c <= 'F'  then x.adv () ; x.tryParse_UnicodeChar (n - 1, sr + (int c - int 'A' + 10))
           elif  c >= 'a' && c <= 'f'  then x.adv () ; x.tryParse_UnicodeChar (n - 1, sr + (int c - int 'a' + 10))
           else
-            x.Expected (pos, Tokens.HexDigit)
-            false
+            x.raise_HexDigit ()
 
       member x.tryParse_Chars (b : int) : bool =
         let inline app (c : char) = ignore <| sb.Append c
         let inline seq e          = ignore <| sb.Append (s, b, e - b)
 
-        if x.eos then x.raise_Eos ()
+        if x.eos then x.raise_Char () || x.raise_Eos ()
         else
           let c = x.ch
           match c with
@@ -491,7 +591,7 @@ module JsonConformingParser =
           | '\\'        ->
             seq pos
             x.adv ()
-            if x.eos then x.raise_Eos ()
+            if x.eos then x.raise_Escapes () || x.raise_Eos ()
             else
               let e = x.ch
               let result =
@@ -507,9 +607,7 @@ module JsonConformingParser =
                 | 'u' ->
                   x.adv ()
                   x.tryParse_UnicodeChar (4, 0)
-                | _ ->
-                  x.ExpectedChars (pos, "\"\\/bfnrtu")
-                  false
+                | _ -> x.raise_Escapes ()
               result && x.tryParse_Chars pos
           | _           ->
             x.adv ()
@@ -577,7 +675,7 @@ module JsonConformingParser =
         && (v <- objectValue (ms.ToArray ()); x.discardMembers ms;true)
 
       member x.tryParse_Value (v : JsonValue byref): bool =
-        if x.eos then x.raise_Eos ()
+        if x.eos then x.raise_Value () || x.raise_Eos ()
         else
           let result =
             match x.ch with
@@ -593,7 +691,7 @@ module JsonConformingParser =
           result && x.consume_WhiteSpace ()
 
       member x.tryParse_RootValue (v : JsonValue byref) : bool =
-        if x.eos then x.raise_Eos ()
+        if x.eos then x.raise_RootValue () || x.raise_Eos ()
         else
           let result =
             match x.ch with
