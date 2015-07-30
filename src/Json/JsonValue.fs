@@ -190,6 +190,9 @@ module JsonConformingParser =
     [<Literal>]
     let RootValuePreludes = "{["
 
+    [<Literal>]
+    let OutOfRange        = "'Number out of range'"
+
   module internal Details =
 
     [<Literal>]
@@ -220,10 +223,17 @@ module JsonConformingParser =
     let inline pow10f n = Pow10TableF.[clamp (n - MinimumPow10F) 0 (Pow10TableF.Length - 1)]
 
     [<Literal>]
-    let MinimumPow10D = -28
+    let MinimumPow10D = 0
 
     [<Literal>]
-    let MaximumPow10D = 0
+    let MaximumPow10D = 28
+
+    let Pow10TableD =
+      [|
+        for i in MinimumPow10D..MaximumPow10D -> if i = 0 then 1M else pown 10M i
+      |]
+
+    let inline pow10d n = Pow10TableD.[clamp (n - MinimumPow10D) 0 (Pow10TableD.Length - 1)]
 
     let inline isWhiteSpace (c : char) : bool =
       c = ' ' || c = '\t' || c = '\n' || c = '\r'
@@ -353,6 +363,10 @@ module JsonConformingParser =
         x.Unexpected (pos, Tokens.EOS)
         false
 
+      member x.raise_OutOfRange (): bool =
+        x.Unexpected (pos, Tokens.OutOfRange)
+        false
+
       member x.raise_Value ()     : bool =
         x.Expected      (pos, Tokens.Null )
         x.Expected      (pos, Tokens.True )
@@ -459,15 +473,18 @@ module JsonConformingParser =
           x.raise_Value ()
 
       member x.tryParse_UInt32 (first : bool, r : uint32 byref) : bool =
-        let z = uint32 '0'
+        let z = uint64 '0'
         if x.eos then x.raise_Digit () || x.raise_Eos () || not first
         else
           let c = x.ch
           if c >= '0' && c <= '9' then
             x.adv ()
-            // TODO: mrange - check out of range
-            r <- 10u*r + (uint32 c - z)
-            x.tryParse_UInt32 (false, &r)
+            let nr = 10UL*uint64 r + (uint64 c - z)
+            if (nr >>> 32) = 0UL then
+              r <- uint32 nr
+              x.tryParse_UInt32 (false, &r)
+            else
+              x.raise_OutOfRange ()
           else
             x.raise_Digit () || not first
 
@@ -482,8 +499,7 @@ module JsonConformingParser =
             if (UInt96.mul10 &r0 &r1 &r2) && (UInt96.add &r0 &r1 &r2 a) then
               x.tryParse_UInt96 (false, &r0, &r1, &r2)
             else
-              x.Unexpected (pos, "NumberOutOfRange")
-              false
+              x.raise_OutOfRange ()
           else
             x.raise_Digit () || not first
 
@@ -492,9 +508,6 @@ module JsonConformingParser =
         let zero = x.tryConsume_Char '0'
 
         if zero then
-          r0 <- 0u
-          r1 <- 0u
-          r2 <- 0u
           true
         else
           x.tryParse_UInt96 (true, &r0, &r1, &r2)
@@ -530,37 +543,41 @@ module JsonConformingParser =
         let hasSign       = x.tryConsume_Char '-'
         let inline sign v = if hasSign then -v else v
 
-        let mutable r0  = 0u
-        let mutable r1  = 0u
-        let mutable r2  = 0u
-        let mutable s   = 0
-        let mutable exp = 0
+        let mutable r0    = 0u
+        let mutable r1    = 0u
+        let mutable r2    = 0u
+        let mutable scale = 0
+        let mutable exp   = 0
 
         let result =
           x.tryParse_UInt96_0       (&r0, &r1, &r2)
-          && x.tryParse_Fraction96  (&r0, &r1, &r2, &s)
+          && x.tryParse_Fraction96  (&r0, &r1, &r2, &scale)
           && x.tryParse_Exponent    (&exp)
 
-        let effectiveExp = exp - s
-
         if result then
-          if effectiveExp >= MinimumPow10D && effectiveExp <= MaximumPow10D then
-            let d = Decimal (int r0, int r1, int r2, hasSign, byte effectiveExp)
+          let effectiveExp = exp - scale
+
+          if r0 = 0u && r1 = 0u && r2 = 0u then
+            v <- decimalValue (sign 0M)
+            true
+          elif effectiveExp >= 0 then
+            // TODO: This can throw
+            let d = pow10d effectiveExp * Decimal (int r0, int r1, int r2, hasSign, 0uy)
             v <- decimalValue d
             true
-          elif effectiveExp >= MinimumPow10F && effectiveExp <= MaximumPow10F then
-            // Exponent not in range for decimal, use float fallback
+          elif effectiveExp >= -28 then
+            let d = Decimal (int r0, int r1, int r2, hasSign, byte -effectiveExp)
+            v <- decimalValue d
+            true
+          else
             let d = Decimal (int r0, int r1, int r2, hasSign, 0uy)
             let f = float d
             v <- floatValue (f * (pow10f effectiveExp))
             true
-          elif effectiveExp < MinimumPow10F then
-            v <- decimalValue (sign 0M)
-            true
+(*
           else
-            x.Unexpected (pos, "NumberOutOfRange")
-            false
-
+            x.raise_OutOfRange ()
+*)
         else
           false
 
